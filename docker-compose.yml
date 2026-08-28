@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: msb_sge_db
+    environment:
+      POSTGRES_USER: msb
+      POSTGRES_PASSWORD: msb
+      POSTGRES_DB: msb_sge
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./data:/data:ro
+      - ./sql:/sql:ro
+      - msb_pgdata:/var/lib/postgresql/data
+
+volumes:
+  msb_pgdata:
