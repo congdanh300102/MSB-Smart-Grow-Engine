@@ -1,0 +1,5 @@
+# Không tự tải file LFS lớn khi clone (tiết kiệm băng thông LFS 1GB/tháng của GitHub,
+# và để Streamlit Community Cloud không kéo ~475MB mỗi lần reboot — app không cần các file này).
+# Muốn lấy file dữ liệu lớn thật:  git lfs pull  (hoặc  git lfs fetch --all)
+[lfs]
+	fetchexclude = *

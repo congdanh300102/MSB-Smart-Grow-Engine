@@ -177,5 +177,9 @@ feedback. Nhờ đó:
 - `dim_customer` **không lưu tên/SĐT/email** — chỉ thuộc tính phân khúc/nhân khẩu học đã ẩn danh.
 - `\copy` liệt kê cột tường minh vì COPY ánh xạ theo **vị trí cột**, không theo tên.
 - `ai_model_*` chỉ có sau khi chạy `train_models.py --apply`; `02_load.sql` không phụ thuộc chúng.
-- **`data/csv/` được `.gitignore`** (raw CSV ~500MB, `fact_casa_daily.csv` >100MB vượt giới hạn GitHub).
-  Repo giữ bản **Parquet**. Sinh lại CSV để chạy `02_load.sql`: `py src/generate_data.py --customers 25000 --seed 42 --casa-days 45 --digital-days 45` (tái lập chính xác nhờ seed cố định).
+- **File dữ liệu lớn** (`fact_casa_daily` / `fact_transaction` / `fact_digital_activity` CSV,
+  `fact_casa_daily.parquet`) theo dõi qua **Git LFS**. `.lfsconfig` đặt `fetchexclude = *` nên
+  `git clone` **không tự tải** (tránh cạn quota LFS 1GB/tháng + để Streamlit Cloud deploy nhanh).
+  Lấy về khi cần: `git lfs pull`. App Streamlit **không cần** các file này.
+- Sinh lại toàn bộ dữ liệu: `py src/generate_data.py --customers 25000 --seed 42 --casa-days 45 --digital-days 45`
+  (tái lập chính xác nhờ seed cố định), rồi `py src/train_models.py --apply`.

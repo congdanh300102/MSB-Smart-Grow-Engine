@@ -9,7 +9,6 @@ Dữ liệu đọc từ  data/parquet/  (sinh bằng src/generate_data.py + src/
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -88,11 +87,23 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
+# App chỉ cần các bảng feature / score / decision / model — KHÔNG nạp các bảng
+# raw fact theo-ngày (fact_casa_daily ~1M dòng...) để không vượt RAM khi deploy.
+NEEDED = [
+    "customer_360_feature_mart", "ai_customer_score", "ai_recommendation",
+    "ai_score_reason", "dim_customer", "dim_product", "rm_action_feedback",
+    "fact_campaign", "ai_model_coefficient", "ai_model_metric",
+    "ai_model_registry", "ml_propensity_training_set",
+]
+
+
 @st.cache_data(show_spinner="Đang tải dữ liệu…")
 def load():
     d = {}
-    for f in PARQUET.glob("*.parquet"):
-        d[f.stem] = pd.read_parquet(f)
+    for name in NEEDED:
+        p = PARQUET / f"{name}.parquet"
+        if p.exists():
+            d[name] = pd.read_parquet(p)
     return d
 
 
@@ -107,6 +118,15 @@ try:
 except Exception as e:  # pragma: no cover
     st.error(f"Không đọc được data/parquet/. Chạy `py src/generate_data.py` + "
              f"`py src/train_models.py --apply` trước.\n\n{e}")
+    st.stop()
+
+_missing = [t for t in ("customer_360_feature_mart", "ai_customer_score",
+                        "ai_recommendation", "ai_score_reason", "dim_customer",
+                        "dim_product") if t not in D]
+if _missing:
+    st.error("Thiếu file dữ liệu: " + ", ".join(f"`data/parquet/{m}.parquet`" for m in _missing)
+             + ".\n\nNếu clone bằng Git LFS chưa `git lfs pull`, hoặc chưa chạy "
+             "`py src/generate_data.py` + `py src/train_models.py --apply`.")
     st.stop()
 
 MART = D["customer_360_feature_mart"]
@@ -337,10 +357,12 @@ elif PAGE.startswith("🧭"):
             st.plotly_chart(fig, width="stretch")
         with c2:
             comp = best[["product_propensity_score", "customer_value_score", "intent_signal_score",
-                         "engagement_score", "timing_score", "relationship_score"]].mean()
-            comp.index = ["Propensity 25%", "Cust. Value 20%", "Intent 20%",
-                          "Engagement 15%", "Timing 10%", "Relationship 10%"]
-            fig = px.bar(comp, orientation="h", color_discrete_sequence=[MSB_INK])
+                         "engagement_score", "timing_score", "relationship_score"]].mean().reset_index()
+            comp.columns = ["thành phần", "điểm"]
+            comp["thành phần"] = ["Propensity 25%", "Cust. Value 20%", "Intent 20%",
+                                  "Engagement 15%", "Timing 10%", "Relationship 10%"]
+            fig = px.bar(comp, x="điểm", y="thành phần", orientation="h",
+                         color_discrete_sequence=[MSB_INK])
             fig.update_layout(title="Điểm bình quân từng thành phần", showlegend=False, height=380)
             st.plotly_chart(fig, width="stretch")
         st.caption("Smart Growth Score = 25%·Propensity + 20%·CustomerValue + 20%·Intent "
@@ -353,9 +375,11 @@ elif PAGE.startswith("🧭"):
         fig.update_layout(title="Decision Gate 1 — (khách × sản phẩm mục tiêu)", height=340)
         st.plotly_chart(fig, width="stretch")
         rules = [c for c in ELIG.columns if c.startswith("rule_")]
-        fail = (~ELIG[rules]).mean().sort_values(ascending=False) * 100
-        fail.index = [r.replace("rule_", "").replace("_", " ") for r in fail.index]
-        fig = px.bar(fail, orientation="h", color_discrete_sequence=[MSB_RED])
+        fail = ((~ELIG[rules]).mean().sort_values(ascending=False) * 100).reset_index()
+        fail.columns = ["điều kiện", "pct"]
+        fail["điều kiện"] = fail["điều kiện"].str.replace("rule_", "").str.replace("_", " ")
+        fig = px.bar(fail, x="pct", y="điều kiện", orientation="h",
+                     color_discrete_sequence=[MSB_RED])
         fig.update_layout(title="% (khách × sản phẩm) rớt từng điều kiện", showlegend=False, height=320)
         st.plotly_chart(fig, width="stretch")
 
@@ -559,37 +583,42 @@ elif PAGE.startswith("📊"):
 
     c1, c2 = st.columns(2)
     with c1:
-        pr = best.priority_level.value_counts().reindex(PRIORITY_ORDER).fillna(0)
-        fig = px.bar(pr, color=pr.index, color_discrete_map=PRIORITY_COLOR)
+        pr = (best.priority_level.value_counts().reindex(PRIORITY_ORDER).fillna(0)
+              .rename_axis("priority").reset_index(name="customers"))
+        fig = px.bar(pr, x="priority", y="customers", color="priority",
+                     color_discrete_map=PRIORITY_COLOR)
         fig.update_layout(title="Phân bố Priority (điểm cao nhất / khách)",
                           showlegend=False, height=360, xaxis_title="")
         st.plotly_chart(fig, width="stretch")
     with c2:
         seg = best.merge(CUST[["customer_id", "customer_segment"]], on="customer_id")
-        piv = seg.groupby("customer_segment").smart_growth_score.mean().sort_values()
-        fig = px.bar(piv, orientation="h", color_discrete_sequence=[MSB_RED])
+        piv = (seg.groupby("customer_segment").smart_growth_score.mean()
+               .sort_values().reset_index())
+        fig = px.bar(piv, x="smart_growth_score", y="customer_segment", orientation="h",
+                     color_discrete_sequence=[MSB_RED])
         fig.update_layout(title="Smart Growth Score bình quân theo phân khúc",
                           showlegend=False, height=360)
         st.plotly_chart(fig, width="stretch")
 
     c3, c4 = st.columns(2)
     with c3:
-        nbp = RECO[RECO.priority_rank == 1].recommended_product_id.map(PID_NAME).value_counts()
-        fig = px.pie(values=nbp.values, names=nbp.index, color_discrete_sequence=PALETTE, hole=0.5)
+        nbp = (RECO[RECO.priority_rank == 1].recommended_product_id.map(PID_NAME)
+               .value_counts().rename_axis("product").reset_index(name="n"))
+        fig = px.pie(nbp, values="n", names="product", color_discrete_sequence=PALETTE, hole=0.5)
         fig.update_layout(title="Next Best Product #1 — cơ cấu danh mục", height=360)
         st.plotly_chart(fig, width="stretch")
     with c4:
         if FB is not None:
-            oc = FB.customer_response.value_counts()
-            fig = px.bar(oc, color_discrete_sequence=[MSB_INK])
+            oc = FB.customer_response.value_counts().rename_axis("response").reset_index(name="n")
+            fig = px.bar(oc, x="response", y="n", color_discrete_sequence=[MSB_INK])
             fig.update_layout(title="Kết quả hành động RM (feedback loop)",
                               showlegend=False, height=360, xaxis_title="")
             st.plotly_chart(fig, width="stretch")
 
     st.subheader("Xếp hạng chi nhánh theo số cơ hội High")
-    br = TOP[TOP.priority_level.isin(["Very High", "High"])].groupby("branch_id").size() \
-        .sort_values(ascending=False).head(20)
-    fig = px.bar(br, color_discrete_sequence=[MSB_RED])
+    br = (TOP[TOP.priority_level.isin(["Very High", "High"])].groupby("branch_id").size()
+          .sort_values(ascending=False).head(20).rename_axis("branch_id").reset_index(name="n"))
+    fig = px.bar(br, x="branch_id", y="n", color_discrete_sequence=[MSB_RED])
     fig.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="cơ hội High")
     st.plotly_chart(fig, width="stretch")
 
