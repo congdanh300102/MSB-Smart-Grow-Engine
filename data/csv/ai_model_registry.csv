@@ -1,0 +1,5 @@
+model_id,model_version,product_id,algorithm,trained_at,n_train,n_test,positive_rate,feature_list
+sge_propensity_logreg,v3.0,P001,logistic_regression,2026-09-04 14:21:28,11353,3785,0.32468,"x1_monthly_spending,x2_income,x3_digital_activity,x4_salary_account,x5_campaign_response,x6_product_gap"
+sge_propensity_logreg,v3.0,P004,logistic_regression,2026-09-04 14:21:28,13317,4440,0.265923,"x1_monthly_spending,x2_income,x3_digital_activity,x4_salary_account,x5_campaign_response,x6_product_gap"
+sge_propensity_logreg,v3.0,P007,logistic_regression,2026-09-04 14:21:28,11568,3856,0.232949,"x1_monthly_spending,x2_income,x3_digital_activity,x4_salary_account,x5_campaign_response,x6_product_gap"
+sge_propensity_logreg,v3.0,P009,logistic_regression,2026-09-04 14:21:28,15666,5222,0.259431,"x1_monthly_spending,x2_income,x3_digital_activity,x4_salary_account,x5_campaign_response,x6_product_gap"

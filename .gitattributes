@@ -1,0 +1,4 @@
+data/csv/fact_casa_daily.csv filter=lfs diff=lfs merge=lfs -text
+data/csv/fact_transaction.csv filter=lfs diff=lfs merge=lfs -text
+data/csv/fact_digital_activity.csv filter=lfs diff=lfs merge=lfs -text
+data/parquet/fact_casa_daily.parquet filter=lfs diff=lfs merge=lfs -text

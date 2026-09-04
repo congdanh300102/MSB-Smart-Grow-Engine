@@ -1,0 +1,11 @@
+product_id,product_code,product_name,product_group,product_type,product_tier,active_flag
+P001,CC_PLATINUM,Platinum Credit Card,CREDIT_CARD,CREDIT_CARD,PLATINUM,True
+P002,CC_GOLD,Gold Credit Card,CREDIT_CARD,CREDIT_CARD,GOLD,True
+P003,CC_STANDARD,Standard Credit Card,CREDIT_CARD,CREDIT_CARD,STANDARD,True
+P004,LOAN_HOME,Vay mua nhà,LOAN,HOME_LOAN,,True
+P005,LOAN_AUTO,Vay mua ô tô,LOAN,AUTO_LOAN,,True
+P006,LOAN_PERSONAL,Vay tiêu dùng,LOAN,PERSONAL_LOAN,,True
+P007,TD_STANDARD,Tiền gửi có kỳ hạn,DEPOSIT,TERM_DEPOSIT,,True
+P008,TD_FLEXI,Tiền gửi linh hoạt,DEPOSIT,FLEXI_DEPOSIT,,True
+P009,INVEST_FUND,Quỹ mở,INVESTMENT,MUTUAL_FUND,,True
+P010,INVEST_BOND,Trái phiếu,INVESTMENT,BOND,,True

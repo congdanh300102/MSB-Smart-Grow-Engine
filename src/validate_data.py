@@ -1,20 +1,18 @@
 """
-Validate the generated dataset against the schema constraints
-(PK uniqueness, FK referential integrity, decimal precision, value domains)
-BEFORE loading into PostgreSQL. Exits non-zero on any violation.
+Validate the v2 dataset (PK uniqueness, FK integrity, value domains) before
+loading into PostgreSQL. Exits non-zero on any violation.
 
     py src/validate_data.py
 """
 import os
 import sys
-import decimal
 
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSV = os.path.join(ROOT, "data", "csv")
 
-errors = []
+errors, warns = [], []
 
 
 def load(name):
@@ -22,128 +20,167 @@ def load(name):
 
 
 TABLES = [
-    "dim_customer", "fact_casa_daily", "fact_transaction", "fact_card", "fact_loan",
-    "fact_deposit", "fact_insurance", "fact_digital_activity", "fact_crm_interaction",
-    "fact_customer_service", "fact_campaign", "customer_360_feature_mart",
-    "ai_customer_score", "ai_recommendation", "rm_action_feedback",
+    "dim_rm", "dim_product", "dim_campaign", "dim_customer", "dim_card",
+    "fact_casa_daily", "fact_transaction", "agg_customer_transaction", "fact_card_monthly",
+    "fact_deposit", "fact_loan", "fact_insurance", "fact_digital_activity",
+    "fact_crm_interaction", "fact_customer_service", "fact_campaign",
+    "customer_360_feature_mart", "ai_feature_customer", "ai_customer_score",
+    "ai_score_reason", "ai_recommendation", "rm_action_feedback",
+    "ml_credit_card_training_set", "ml_propensity_training_set",
 ]
 d = {t: load(t) for t in TABLES}
 
-# ---- primary keys -------------------------------------------------------
+# ---- primary keys (single or composite) --------------------------------
 PK = {
-    "dim_customer": "customer_key",
-    "fact_casa_daily": "fact_casa_daily_key",
-    "fact_transaction": "fact_transaction_key",
-    "fact_card": "fact_card_key",
-    "fact_loan": "fact_loan_key",
-    "fact_deposit": "fact_deposit_key",
-    "fact_insurance": "fact_insurance_key",
-    "fact_digital_activity": "fact_digital_activity_key",
-    "fact_crm_interaction": "fact_crm_interaction_key",
-    "fact_customer_service": "fact_customer_service_key",
-    "fact_campaign": "fact_campaign_key",
-    "customer_360_feature_mart": "customer_360_feature_key",
-    "ai_customer_score": "ai_customer_score_key",
-    "ai_recommendation": "ai_recommendation_key",
-    "rm_action_feedback": "rm_action_feedback_key",
+    "dim_rm": ["rm_id"], "dim_product": ["product_id"], "dim_campaign": ["campaign_id"],
+    "dim_customer": ["customer_id"], "dim_card": ["card_id"],
+    "fact_casa_daily": ["snapshot_date", "account_id"],
+    "fact_transaction": ["transaction_id"],
+    "agg_customer_transaction": ["customer_id", "snapshot_date"],
+    "fact_card_monthly": ["customer_id", "card_id", "month"],
+    "fact_deposit": ["deposit_id"], "fact_loan": ["loan_id"], "fact_insurance": ["policy_id"],
+    "fact_digital_activity": ["activity_date", "customer_id"],
+    "fact_crm_interaction": ["interaction_id"], "fact_customer_service": ["case_id"],
+    "fact_campaign": ["campaign_customer_id"],
+    "customer_360_feature_mart": ["snapshot_date", "customer_id"],
+    "ai_feature_customer": ["snapshot_date", "customer_id"],
+    "ai_customer_score": ["score_id"], "ai_score_reason": ["reason_id"],
+    "ai_recommendation": ["recommendation_id"], "rm_action_feedback": ["feedback_id"],
+    "ml_credit_card_training_set": ["customer_id", "observation_date"],
+    "ml_propensity_training_set": ["customer_id", "snapshot_date", "product_id"],
 }
-for t, k in PK.items():
+for t, keys in PK.items():
     df = d[t]
-    if df[k].duplicated().any():
-        errors.append(f"{t}: duplicate PK {k}")
-    if df[k].isna().any():
-        errors.append(f"{t}: null PK {k}")
+    if df[keys].duplicated().any():
+        errors.append(f"{t}: duplicate PK {keys}")
+    if df[keys].isna().any().any():
+        errors.append(f"{t}: null PK column in {keys}")
 
-if d["dim_customer"]["customer_id"].duplicated().any():
-    errors.append("dim_customer: customer_id not unique")
+# ---- foreign keys -------------------------------------------------------
+cust_ids = set(d["dim_customer"]["customer_id"])
+rm_ids = set(d["dim_rm"]["rm_id"])
+product_ids = set(d["dim_product"]["product_id"])
+campaign_ids = set(d["dim_campaign"]["campaign_id"])
 
-# ---- foreign keys -----------------------------------------------------
-cust_keys = set(d["dim_customer"]["customer_key"])
-for t in ["fact_casa_daily", "fact_transaction", "fact_card", "fact_loan", "fact_deposit",
-          "fact_insurance", "fact_digital_activity", "fact_crm_interaction",
-          "fact_customer_service", "fact_campaign", "customer_360_feature_mart"]:
-    bad = ~d[t]["customer_key"].isin(cust_keys)
+CUST_FK_TABLES = [
+    "dim_card", "fact_casa_daily", "fact_transaction", "agg_customer_transaction",
+    "fact_card_monthly", "fact_deposit", "fact_loan", "fact_insurance",
+    "fact_digital_activity", "fact_crm_interaction", "fact_customer_service",
+    "fact_campaign", "customer_360_feature_mart", "ai_feature_customer",
+    "ai_customer_score", "ai_recommendation", "rm_action_feedback",
+    "ml_propensity_training_set",
+]
+for t in CUST_FK_TABLES:
+    bad = ~d[t]["customer_id"].isin(cust_ids)
     if bad.any():
-        errors.append(f"{t}: {bad.sum()} rows with unknown customer_key")
+        errors.append(f"{t}: {bad.sum()} rows with unknown customer_id")
 
-camp_keys = set(d["fact_campaign"]["fact_campaign_key"])
-ck = d["customer_360_feature_mart"]["campaign_key"].dropna()
-bad = ~ck.isin(camp_keys)
+for t in ["dim_customer"]:
+    bad = ~d[t]["rm_id"].dropna().isin(rm_ids)
+    if bad.any():
+        errors.append(f"{t}: {bad.sum()} rows with unknown rm_id")
+for t in ["fact_crm_interaction", "rm_action_feedback"]:
+    bad = ~d[t]["rm_id"].dropna().isin(rm_ids)
+    if bad.any():
+        errors.append(f"{t}: {bad.sum()} rows with unknown rm_id")
+
+bad = ~d["ai_customer_score"]["product_id"].isin(product_ids)
 if bad.any():
-    errors.append(f"customer_360_feature_mart: {bad.sum()} rows with unknown campaign_key")
-
-feat_keys = set(d["customer_360_feature_mart"]["customer_360_feature_key"])
-bad = ~d["ai_customer_score"]["customer_360_feature_key"].isin(feat_keys)
+    errors.append(f"ai_customer_score: {bad.sum()} unknown product_id")
+bad = ~d["ai_recommendation"]["recommended_product_id"].dropna().isin(product_ids)
 if bad.any():
-    errors.append(f"ai_customer_score: {bad.sum()} rows with unknown customer_360_feature_key")
-
-score_keys = set(d["ai_customer_score"]["ai_customer_score_key"])
-bad = ~d["ai_recommendation"]["ai_customer_score_key"].isin(score_keys)
+    errors.append(f"ai_recommendation: {bad.sum()} unknown recommended_product_id")
+bad = ~d["dim_campaign"]["product_id"].dropna().isin(product_ids)
 if bad.any():
-    errors.append(f"ai_recommendation: {bad.sum()} rows with unknown ai_customer_score_key")
-
-reco_keys = set(d["ai_recommendation"]["ai_recommendation_key"])
-bad = ~d["rm_action_feedback"]["ai_recommendation_key"].isin(reco_keys)
+    errors.append(f"dim_campaign: {bad.sum()} unknown product_id")
+bad = ~d["fact_campaign"]["campaign_id"].isin(campaign_ids)
 if bad.any():
-    errors.append(f"rm_action_feedback: {bad.sum()} rows with unknown ai_recommendation_key")
+    errors.append(f"fact_campaign: {bad.sum()} unknown campaign_id")
 
-# ---- decimal precision (precision, scale) ----------------------------
-DECIMALS = {
-    ("fact_casa_daily", "daily_balance"): (18, 2),
-    ("fact_transaction", "amount"): (18, 2),
-    ("fact_card", "credit_limit"): (18, 2),
-    ("fact_card", "utilization_pct"): (5, 2),
-    ("fact_loan", "outstanding_principal"): (18, 2),
-    ("fact_loan", "interest_rate"): (5, 2),
-    ("fact_deposit", "deposit_amount"): (18, 2),
-    ("customer_360_feature_mart", "campaign_response_rate"): (5, 2),
-    ("customer_360_feature_mart", "digital_engagement_score"): (10, 2),
-    ("ai_customer_score", "churn_score"): (10, 4),
-    ("ai_customer_score", "propensity_to_buy_score"): (10, 4),
-    ("ai_recommendation", "confidence_score"): (10, 4),
-}
-for (t, col), (prec, scale) in DECIMALS.items():
-    s = d[t][col].dropna()
-    max_int_digits = prec - scale
-    over = s[s.abs() >= 10 ** max_int_digits]
-    if len(over):
-        errors.append(f"{t}.{col}: {len(over)} values exceed DECIMAL({prec},{scale}) "
-                      f"(max abs {s.abs().max():,.2f})")
+score_ids = set(d["ai_customer_score"]["score_id"])
+bad = ~d["ai_score_reason"]["score_id"].isin(score_ids)
+if bad.any():
+    errors.append(f"ai_score_reason: {bad.sum()} unknown score_id")
+bad = ~d["ai_recommendation"]["score_id"].isin(score_ids)
+if bad.any():
+    errors.append(f"ai_recommendation: {bad.sum()} unknown score_id")
+
+reco_ids = set(d["ai_recommendation"]["recommendation_id"])
+bad = ~d["rm_action_feedback"]["recommendation_id"].isin(reco_ids)
+if bad.any():
+    errors.append(f"rm_action_feedback: {bad.sum()} unknown recommendation_id")
+
+# ---- ml_propensity_training_set ------------------------------------
+pt = d["ml_propensity_training_set"]
+bad = ~pt["product_id"].isin(product_ids)
+if bad.any():
+    errors.append(f"ml_propensity_training_set: {bad.sum()} unknown product_id")
+for c in ["x1_monthly_spending", "x2_income", "x3_digital_activity",
+          "x4_salary_account", "x5_campaign_response", "x6_product_gap"]:
+    if pt[c].min() < -1e-6 or pt[c].max() > 1 + 1e-6:
+        errors.append(f"ml_propensity_training_set.{c} outside [0,1]: [{pt[c].min()},{pt[c].max()}]")
+for c in ["y_holds_product", "y_adopt_next_90d"]:
+    if not set(pt[c].dropna().unique()).issubset({0, 1}):
+        errors.append(f"ml_propensity_training_set.{c} not binary")
+if (pt.loc[pt["y_holds_product"] == 1, "y_adopt_next_90d"] == 1).any():
+    warns.append("ml_propensity_training_set: some holders also flagged y_adopt_next_90d=1")
+_pos = pt.groupby("product_group")["y_adopt_next_90d"].mean()
+print("info: y_adopt_next_90d positive rate by product:",
+      {k: round(v, 3) for k, v in _pos.items()})
 
 # ---- value domains --------------------------------------------------
-for col in ["churn_score", "propensity_to_buy_score", "credit_risk_score", "next_best_action_score"]:
-    s = d["ai_customer_score"][col]
-    if s.min() < 0 or s.max() > 1:
-        errors.append(f"ai_customer_score.{col} outside [0,1]: [{s.min()}, {s.max()}]")
+s = d["ai_customer_score"]
+for col in ["product_propensity_score", "customer_value_score", "intent_signal_score",
+            "engagement_score", "timing_score", "relationship_score", "smart_growth_score"]:
+    if s[col].min() < 0 or s[col].max() > 100.0001:
+        errors.append(f"ai_customer_score.{col} outside [0,100]: [{s[col].min()},{s[col].max()}]")
+if s["propensity_probability"].min() < 0 or s["propensity_probability"].max() > 1:
+    errors.append("ai_customer_score.propensity_probability outside [0,1]")
+
+exp_prio = pd.cut(s["smart_growth_score"], [-1, 60, 70, 80, 90, 101], right=False,
+                  labels=["Do not prioritize", "Low", "Medium", "High", "Very High"])
+mismatch = (exp_prio.astype(str) != s["priority_level"].astype(str)).sum()
+if mismatch:
+    errors.append(f"ai_customer_score: {mismatch} rows with priority_level not matching score bucket")
 
 r = d["ai_recommendation"]
-if not r.groupby("ai_customer_score_key")["priority_rank"].apply(
-        lambda x: sorted(x) == list(range(1, len(x) + 1))).all():
-    errors.append("ai_recommendation: priority_rank not 1..k per customer")
+bad_rank = r.groupby("customer_id")["priority_rank"].apply(
+    lambda x: sorted(x) != list(range(1, len(x) + 1)))
+if bad_rank.any():
+    errors.append(f"ai_recommendation: {bad_rank.sum()} customers with non-1..k priority_rank")
 
-if d["fact_card"]["utilization_pct"].max() > 100:
-    errors.append("fact_card.utilization_pct > 100")
+card = d["dim_card"]
+if (card["card_type"] == "CREDIT").sum() and card.loc[card.card_type == "CREDIT", "credit_limit"].min() < 0:
+    errors.append("dim_card: negative credit_limit")
 
-rating = d["rm_action_feedback"]["rating"]
-if rating.min() < 1 or rating.max() > 5:
-    errors.append(f"rm_action_feedback.rating outside 1..5: [{rating.min()},{rating.max()}]")
+fb = d["rm_action_feedback"]
+bad = fb["converted_flag"] & ~fb["application_flag"]
+if bad.any():
+    warns.append(f"rm_action_feedback: {bad.sum()} converted rows without application_flag")
 
-# ---- coherence signal: archetype-free sanity on scores --------------
-mart = d["customer_360_feature_mart"].merge(
-    d["ai_customer_score"], on="customer_360_feature_key")
-corr = mart["digital_engagement_score"].corr(mart["propensity_to_buy_score"])
-print(f"info: corr(digital_engagement, propensity_to_buy) = {corr:+.3f}")
-corr2 = mart["total_loan_outstanding"].corr(mart["credit_risk_score"])
-print(f"info: corr(loan_outstanding, credit_risk)         = {corr2:+.3f}")
+# ---- coherence signals -----------------------------------------------
+mart = d["customer_360_feature_mart"]
+best_score = s.groupby("customer_id")["smart_growth_score"].max()
+elig_like = mart.set_index("customer_id")
+corr = elig_like["digital_engagement_score"].corr(best_score.reindex(elig_like.index))
+print(f"info: corr(digital_engagement, best smart_growth_score) = {corr:+.3f}")
+pct85 = (best_score >= 85).mean() * 100
+print(f"info: customers with best smart_growth_score >= 85 : {pct85:.1f}%  "
+      f"(n={ (best_score>=85).sum() })")
+print(f"info: priority_level distribution (all score rows):")
+print(s["priority_level"].value_counts().to_string())
 
-# ---- report --------------------------------------------------------
 print()
 for t in TABLES:
-    print(f"  {t:<28} {len(d[t]):>9,} rows")
+    print(f"  {t:<30} {len(d[t]):>10,} rows")
 print()
+if warns:
+    print("WARNINGS:")
+    for w in warns:
+        print("  !", w)
 if errors:
     print("VALIDATION FAILED:")
     for e in errors:
         print("  x", e)
     sys.exit(1)
-print("VALIDATION PASSED - all PK/FK/precision/domain checks OK")
+print("VALIDATION PASSED")

@@ -4,3 +4,9 @@ __pycache__/
 .idea/
 .vscode/
 *.tmp
+
+# Model binaries — regenerate với `py src/train_models.py` (giữ report/metric/png trong models/)
+models/*.joblib
+
+# Dữ liệu (CSV + Parquet) được commit; 4 file lớn theo dõi qua Git LFS (xem .gitattributes).
+# Sinh lại toàn bộ: py src/generate_data.py --customers 25000 --seed 42 --casa-days 45 --digital-days 45
