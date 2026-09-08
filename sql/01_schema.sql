@@ -414,6 +414,17 @@ CREATE TABLE customer_360_feature_mart (
     contact_count_7d              INTEGER,
     serious_complaint_15d         BOOLEAN,
     recent_rejection_30d_flag     BOOLEAN,
+    -- tín hiệu nhu cầu cho danh mục sản phẩm mở rộng (src/products.py)
+    customer_type                VARCHAR(12),
+    occupation_group             VARCHAR(40),
+    industry_group               VARCHAR(40),
+    business_owner_flag          BOOLEAN,
+    agri_flag                    BOOLEAN,
+    family_flag                  BOOLEAN,
+    auto_intent_flag             BOOLEAN,
+    home_intent_flag             BOOLEAN,
+    fx_active_flag               BOOLEAN,
+    securities_value             DECIMAL(18,2),
     PRIMARY KEY (snapshot_date, customer_id)
 );
 

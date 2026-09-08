@@ -1533,6 +1533,41 @@ def dump(name, df):
     print(f"  {name:<30} {len(df):>10,} rows")
 
 
+def add_product_signals(mart, cust, txn, deposit, rng):
+    """Bổ sung cờ tín hiệu nhu cầu cho rule danh mục sản phẩm mở rộng (src/products.py)."""
+    n = len(mart)
+    idx = pd.Index(mart["customer_id"].to_numpy())
+    c = cust.set_index("customer_id").reindex(idx)
+    age = mart["age_group"].astype(str).to_numpy()
+    seg = mart["segment"].astype(str).to_numpy()
+
+    mart["customer_type"] = c["customer_type"].values
+    mart["occupation_group"] = c["occupation_group"].values
+    mart["industry_group"] = c["industry_group"].values
+
+    is_sme = (c["customer_type"].values == "SME") | (c["occupation_group"].values == "BUSINESS_OWNER")
+    mart["business_owner_flag"] = is_sme
+    mart["agri_flag"] = is_sme & (rng.random(n) < 0.18)
+
+    fam_base = np.where(np.isin(age, ["26-35", "36-45", "46-55"]), 0.55, 0.12)
+    mart["family_flag"] = rng.random(n) < fam_base
+
+    auto_cust = set(txn.loc[txn.transaction_category == "AUTOMOTIVE", "customer_id"])
+    mart["auto_intent_flag"] = mart["customer_id"].isin(auto_cust).to_numpy()
+
+    no_home_loan = ~mart["has_active_loan"].to_numpy()
+    home_base = np.where(np.isin(age, ["26-35", "36-45"]) & no_home_loan, 0.10, 0.03)
+    home_base = np.where((mart["balance_growth_3m"].to_numpy() > 0.15) & no_home_loan,
+                         home_base + 0.06, home_base)
+    mart["home_intent_flag"] = rng.random(n) < home_base
+
+    mart["fx_active_flag"] = mart["international_spending_90d"].to_numpy() > 0
+
+    dep_principal = deposit.groupby("customer_id")["principal_amount"].sum().reindex(idx).fillna(0.0)
+    mart["securities_value"] = (dep_principal.values * rng.uniform(0.8, 1.2, n)).round(2)
+    return mart
+
+
 def main():
     global CASA_DAYS, DIGITAL_DAYS
     ap = argparse.ArgumentParser()
@@ -1582,6 +1617,7 @@ def main():
 
     mart = gen_feature_mart(cust, casa_h, agg, dim_card, loan, deposit, insurance, dig_h,
                             crm_feat, svc_feat, camp_feat, rng)
+    mart = add_product_signals(mart, cust, txn, deposit, rng)
     dump("customer_360_feature_mart", mart)
 
     ai_feat, ai_score, ai_reason, prod_props = gen_ai_layer(cust, mart, dim_card, deposit, txn, rng)

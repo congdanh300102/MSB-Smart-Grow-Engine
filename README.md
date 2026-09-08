@@ -28,6 +28,27 @@ CUSTOMER DATA → CUSTOMER 360 → AI MODEL (logistic reg.) → SCORE → RECOMM
 | Decision | `ai_recommendation` (Next Best Product/Action/Channel/Timing) |
 | Feedback | `rm_action_feedback` |
 | Journey views | `v_customer_product_eligibility` (Decision Gate 1), `v_top_opportunities` (Top-20) |
+| **Danh mục sản phẩm MSB** | `dim_product_catalogue` (35 SP), `fact_customer_product_holding`, `ai_product_fit`, `ai_product_recommendation_v2`, `agg_product_demand`, `agg_segment_product_affinity` (`sql/05_product_catalogue.sql`) |
+
+## Danh mục sản phẩm & phân tích mức độ phù hợp (`MSB_products_description.xlsx`)
+
+`src/products.py` chuẩn hoá **958 mã sản phẩm MSB** (phần lớn legacy/nội bộ) → **35 sản phẩm
+bán được** cho KH cá nhân (IND) + hộ KD/DN nhỏ (SME), gom theo *"Nhóm sản phẩm chuẩn hoá"*,
+mỗi sản phẩm có **rule "khách hàng phù hợp"** + **hard-gate** map từ cột *"Khách hàng/Nhu cầu phù hợp"*.
+
+`src/product_analysis.py` → propensity **hybrid** = LR (nhóm neo: thẻ/vay/tiền gửi) + rule fit,
+Smart Growth Score theo sản phẩm, rồi:
+- **Next Best Product** — top-6 sản phẩm phù hợp nhất mỗi khách (loại sản phẩm đã có / cùng nhóm), kèm lý do.
+- **Dự báo cầu 90 ngày** theo sản phẩm × phân khúc (`agg_product_demand`).
+- **Ma trận phân khúc × sản phẩm** (`agg_segment_product_affinity`).
+- **Khoảng trống danh mục** (portfolio gap) theo nhóm.
+- Báo cáo: `models/product_analysis_report.md` · App Streamlit: trang **"Sản phẩm & Nhu cầu"**.
+
+```
+py src/backfill_product_signals.py     # thêm cờ tín hiệu vào feature mart đã có (idempotent)
+py src/product_analysis.py             # sinh dim_product_catalogue + ai_product_fit + forecast
+```
+*(Nếu regen từ đầu: `generate_data.py` đã tự thêm cờ tín hiệu, bỏ qua bước backfill.)*
 
 ## Product Propensity — hồi quy logistic (doc "a.")
 

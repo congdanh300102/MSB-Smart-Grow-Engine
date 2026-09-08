@@ -94,6 +94,9 @@ NEEDED = [
     "ai_score_reason", "dim_customer", "dim_product", "rm_action_feedback",
     "fact_campaign", "ai_model_coefficient", "ai_model_metric",
     "ai_model_registry", "ml_propensity_training_set",
+    # trang "Sản phẩm & Nhu cầu" — chỉ các bảng nhỏ (bỏ ai_product_fit ~vài triệu dòng)
+    "dim_product_catalogue", "ai_product_recommendation_v2", "agg_product_demand",
+    "agg_segment_product_affinity", "fact_customer_product_holding",
 ]
 
 
@@ -141,6 +144,11 @@ COEF = D.get("ai_model_coefficient")
 METRIC = D.get("ai_model_metric")
 REGISTRY = D.get("ai_model_registry")
 PROP_TRAIN = D.get("ml_propensity_training_set")
+CAT = D.get("dim_product_catalogue")
+PRECO = D.get("ai_product_recommendation_v2")
+PDEM = D.get("agg_product_demand")
+PAFF = D.get("agg_segment_product_affinity")
+PHOLD = D.get("fact_customer_product_holding")
 
 PID_NAME = dict(zip(PROD.product_id, PROD.product_name))
 PID_GROUP = dict(zip(PROD.product_id, PROD.product_group))
@@ -225,6 +233,7 @@ PAGE = st.sidebar.radio("Điều hướng", [
     "🧭 Hành trình AI — 12 Actions",
     "🎯 RM Opportunity Desk",
     "👤 Customer 360",
+    "🛍️ Sản phẩm & Nhu cầu",
     "📊 Manager Intelligence",
     "🤖 Mô hình Propensity",
 ])
@@ -687,3 +696,99 @@ elif PAGE.startswith("🤖"):
     if rep:
         with st.expander("models/model_report.md"):
             st.markdown(rep)
+
+
+# ==========================================================================
+# PAGE 5b — SẢN PHẨM & NHU CẦU
+# ==========================================================================
+elif PAGE.startswith("🛍️"):
+    st.title("Sản phẩm & Nhu cầu — Khách hàng phù hợp với sản phẩm nào?")
+    st.caption("Danh mục 35 sản phẩm chuẩn hoá từ MSB_products_description.xlsx (958 mã). "
+               "Propensity = hybrid Logistic Regression (nhóm neo) + rule fit theo "
+               "'Khách hàng/Nhu cầu phù hợp'.")
+
+    if PRECO is None or CAT is None or PDEM is None:
+        st.warning("Chưa có dữ liệu phân tích sản phẩm. Chạy `py src/product_analysis.py`.")
+        st.stop()
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📋 Danh mục", "📈 Dự báo cầu", "🔥 Phân khúc × Sản phẩm", "👤 Gợi ý theo khách hàng"])
+
+    # ---- Danh mục -----------------------------------------------------
+    with tab1:
+        c = CAT.copy()
+        gsel = st.multiselect("Nhóm", P_GROUPS := list(c.product_group.unique()),
+                              default=P_GROUPS)
+        st.dataframe(
+            c[c.product_group.isin(gsel)][["product_code", "product_name", "product_group",
+                                           "subgroup", "product_tier", "customer_type",
+                                           "target_need", "base_propensity"]],
+            width="stretch", hide_index=True, height=520)
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Sản phẩm chuẩn hoá", len(c))
+        if PHOLD is not None:
+            k2.metric("SP đang sở hữu / khách (TB)", f"{len(PHOLD)/MART.customer_id.nunique():.1f}")
+        k3.metric("Đề xuất/khách (top-6)", f"{len(PRECO)/PRECO.customer_id.nunique():.1f}")
+
+    # ---- Dự báo cầu -------------------------------------------------
+    with tab2:
+        d = (PDEM.groupby(["product_code", "product_group"])
+             .agg(eligible=("eligible_customers", "sum"),
+                  holders=("current_holders", "max"),
+                  exp30=("expected_adopters_30d", "sum"),
+                  exp60=("expected_adopters_60d", "sum"),
+                  exp90=("expected_adopters_90d", "sum"),
+                  avg_p=("avg_propensity", "mean")).reset_index()
+             .sort_values("exp90", ascending=False))
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Dự báo mở mới 30 ngày", f"{d.exp30.sum():,.0f}")
+        c2.metric("60 ngày", f"{d.exp60.sum():,.0f}")
+        c3.metric("90 ngày", f"{d.exp90.sum():,.0f}")
+        fig = px.bar(d.head(20), x="exp90", y="product_code", orientation="h", color="product_group",
+                     color_discrete_sequence=PALETTE, text="exp90")
+        fig.update_layout(title="Dự báo mở mới 90 ngày theo sản phẩm (top 20)", height=560,
+                          yaxis_title="", yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig, width="stretch")
+        seg_sel = st.selectbox("Xem chi tiết theo phân khúc", ["(tất cả)"] + sorted(PDEM.segment.dropna().unique()))
+        dd = PDEM if seg_sel == "(tất cả)" else PDEM[PDEM.segment == seg_sel]
+        st.dataframe(dd.sort_values("expected_adopters_90d", ascending=False)[
+            ["product_code", "product_group", "segment", "eligible_customers", "current_holders",
+             "avg_propensity", "high_propensity", "expected_adopters_90d"]],
+            width="stretch", hide_index=True, height=360)
+
+    # ---- Phân khúc × Sản phẩm --------------------------------------
+    with tab3:
+        aff = PAFF.set_index(PAFF.columns[0]) if PAFF.columns[0] != "product_code" else PAFF.set_index("product_code")
+        aff = aff.select_dtypes("number")
+        fig = px.imshow(aff, aspect="auto", color_continuous_scale="Reds",
+                        labels=dict(color="propensity TB"))
+        fig.update_layout(title="Ma trận phân khúc × sản phẩm (propensity trung bình)",
+                          height=760)
+        st.plotly_chart(fig, width="stretch")
+
+    # ---- Gợi ý theo khách hàng ------------------------------------
+    with tab4:
+        cid = st.selectbox("Khách hàng", PRECO.customer_id.drop_duplicates().head(800))
+        r = PRECO[PRECO.customer_id == cid].sort_values("priority_rank")
+        m = MART[MART.customer_id == cid]
+        if not m.empty:
+            mm = m.iloc[0]
+            cc = st.columns(4)
+            cc[0].metric("Phân khúc", str(mm.get("segment", "")))
+            cc[1].metric("Số dư ~", f"{mm.get('avg_balance_90d', 0)/1e6:,.0f}tr")
+            cc[2].metric("SP đang sở hữu",
+                         int((PHOLD.customer_id == cid).sum()) if PHOLD is not None else "—")
+            cc[3].metric("Digital score", f"{mm.get('digital_engagement_score', 0):.0f}")
+        for _, row in r.iterrows():
+            reasons = " · ".join([x for x in (row.reason_1, row.reason_2, row.reason_3) if isinstance(x, str)])
+            st.markdown(
+                f"**#{int(row.priority_rank)} — {row['product_name']}**  "
+                f"<span class='msb-badge'>{row.priority_level}</span>  \n"
+                f"Propensity **{row.propensity:.0%}** · fit {row.fit_score:.0%} · "
+                f"SGS {row.smart_growth_score:.0f} · kỳ vọng chuyển đổi {row.expected_conversion:.0%}  \n"
+                f"<span style='color:#5B6770'>Lý do: {reasons}</span>",
+                unsafe_allow_html=True)
+        st.divider()
+        st.dataframe(r[["priority_rank", "product_code", "product_group", "propensity",
+                        "fit_score", "smart_growth_score", "expected_conversion"]],
+                     width="stretch", hide_index=True)

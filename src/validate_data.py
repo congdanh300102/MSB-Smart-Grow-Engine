@@ -15,8 +15,27 @@ CSV = os.path.join(ROOT, "data", "csv")
 errors, warns = [], []
 
 
+PARQUET = os.path.join(ROOT, "data", "parquet")
+
+
+def _is_lfs_pointer(path):
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(40).startswith(b"version https://git-lfs")
+    except OSError:
+        return True
+
+
 def load(name):
-    return pd.read_csv(os.path.join(CSV, f"{name}.csv"))
+    """Đọc CSV; nếu là Git-LFS pointer (chưa `git lfs pull`) thì rơi về parquet;
+    nếu cả hai đều là pointer -> None (bỏ qua kiểm tra bảng đó)."""
+    csv_p = os.path.join(CSV, f"{name}.csv")
+    if not _is_lfs_pointer(csv_p):
+        return pd.read_csv(csv_p)
+    pq_p = os.path.join(PARQUET, f"{name}.parquet")
+    if not _is_lfs_pointer(pq_p):
+        return pd.read_parquet(pq_p)
+    return None
 
 
 TABLES = [
@@ -29,6 +48,11 @@ TABLES = [
     "ml_credit_card_training_set", "ml_propensity_training_set",
 ]
 d = {t: load(t) for t in TABLES}
+_skipped = [t for t in TABLES if d[t] is None]
+if _skipped:
+    print(f"note: bỏ qua (Git-LFS chưa pull): {', '.join(_skipped)}")
+d = {t: v for t, v in d.items() if v is not None}
+TABLES = [t for t in TABLES if t in d]
 
 # ---- primary keys (single or composite) --------------------------------
 PK = {
@@ -50,6 +74,8 @@ PK = {
     "ml_propensity_training_set": ["customer_id", "snapshot_date", "product_id"],
 }
 for t, keys in PK.items():
+    if t not in d:
+        continue
     df = d[t]
     if df[keys].duplicated().any():
         errors.append(f"{t}: duplicate PK {keys}")
@@ -71,6 +97,8 @@ CUST_FK_TABLES = [
     "ml_propensity_training_set",
 ]
 for t in CUST_FK_TABLES:
+    if t not in d:
+        continue
     bad = ~d[t]["customer_id"].isin(cust_ids)
     if bad.any():
         errors.append(f"{t}: {bad.sum()} rows with unknown customer_id")

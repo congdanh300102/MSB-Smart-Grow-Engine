@@ -1,0 +1,36 @@
+product_id,product_code,product_name,product_group,subgroup,product_tier,customer_type,target_need,base_propensity,active_flag
+PR001,CARD_DEBIT_DOMESTIC,Thẻ ghi nợ nội địa Napas,CARD,DEBIT,,IND,"Cần thẻ để rút tiền, thanh toán và giao dịch hằng ngày",0.35,True
+PR002,CARD_DEBIT_INTL_VISA,Thẻ ghi nợ quốc tế Visa Classic,CARD,DEBIT,CLASSIC,IND,"Thanh toán quốc tế cơ bản, kiểm soát chi tiêu bằng số dư tài khoản",0.22,True
+PR003,CARD_DEBIT_PLATINUM_FCB,Thẻ ghi nợ Mastercard Platinum FCB,CARD,DEBIT,PLATINUM,IND,Khách ưu tiên cần thẻ ghi nợ quốc tế hạn mức / tiện ích cao,0.15,True
+PR004,CARD_CC_MDIGI,Thẻ tín dụng Mastercard mDigi,CARD,CREDIT,STANDARD,IND,"Khách trẻ, chi tiêu ẩm thực, du lịch và dịch vụ số",0.3,True
+PR005,CARD_CC_ONLINE,Thẻ tín dụng Visa Online,CARD,CREDIT,STANDARD,IND,Khách mua sắm / giải trí trực tuyến thường xuyên,0.28,True
+PR006,CARD_CC_FAMILY,Thẻ tín dụng Mastercard Family,CARD,CREDIT,GOLD,IND,"Khách có gia đình, chi tiêu thường xuyên cho giáo dục / chăm sóc / mua sắm",0.27,True
+PR007,CARD_CC_TRAVEL,Thẻ tín dụng Visa Travel,CARD,CREDIT,PLATINUM,IND,"Khách thường xuyên du lịch, đặt vé / khách sạn và thanh toán quốc tế",0.25,True
+PR008,CARD_CC_SIGNATURE,Thẻ tín dụng Visa Signature,CARD,CREDIT,SIGNATURE,IND,"Khách thu nhập khá / cao, ưu tiên hoàn tiền cho chi tiêu thiết yếu và phong cách sống",0.3,True
+PR009,CARD_CC_WORLD_ELITE,Thẻ tín dụng Mastercard World Elite,CARD,CREDIT,WORLD_ELITE,IND,"Khách ưu tiên / cao cấp, thường xuyên du lịch và chi tiêu quốc tế",0.18,True
+PR010,CARD_MERCHANT_POS,Chấp nhận thanh toán Merchant / POS,CARD,ACQUIRING,,SME,"Hộ kinh doanh, doanh nghiệp có điểm bán hoặc thu tiền số",0.3,True
+PR011,CARD_BUSINESS,Thẻ doanh nghiệp,CARD,CREDIT,BUSINESS,SME,Doanh nghiệp cần quản lý và kiểm soát chi tiêu công tác / thanh toán,0.22,True
+PR012,CASA_PERSONAL,Tài khoản thanh toán cá nhân,CASA,PAYMENT,,IND,Khách cá nhân có nhu cầu giao dịch hằng ngày,0.3,True
+PR013,CASA_PAYROLL,M-Payroll / Tài khoản lương,CASA,PAYROLL,,IND,Doanh nghiệp trả lương qua MSB và cán bộ nhân viên,0.35,True
+PR014,CASA_M_FIRST,Khách hàng ưu tiên M-First,CASA,PREMIUM,M_FIRST,IND,Khách đủ tiêu chí phân hạng M-First (AUM / thu nhập),0.2,True
+PR015,CASA_BIZ_MSMART,Tài khoản doanh nghiệp M-Smart,CASA,BIZ_PAYMENT,,SME,SME / doanh nghiệp cần giao dịch và quản lý dòng tiền số,0.28,True
+PR016,CASA_ESCROW,Tài khoản ký quỹ,CASA,ESCROW,,SME,Khách có giao dịch cần ký quỹ / bảo đảm nghĩa vụ,0.1,True
+PR017,FD_TD_STANDARD,Tiền gửi có kỳ hạn cá nhân,FD,TERM_DEPOSIT,,IND,Khách cá nhân có tiền nhàn rỗi,0.35,True
+PR018,FD_TD_ONLINE,Tiền gửi có kỳ hạn trực tuyến,FD,TERM_DEPOSIT,ONLINE,IND,Khách nhàn rỗi + ưu tiên giao dịch số,0.33,True
+PR019,FD_SAV_MAXRATE,Tiết kiệm / Tiền gửi lãi suất cao nhất,FD,SAVINGS,MAX_RATE,IND,"Khách có tiền nhàn rỗi, ưu tiên tối ưu lãi suất",0.3,True
+PR020,FD_SAV_PARTIAL,Tiết kiệm rút gốc từng phần,FD,SAVINGS,PARTIAL_WD,IND,Khách cần linh hoạt sử dụng một phần tiền trước đáo hạn,0.2,True
+PR021,FD_SAV_UPFRONT,Tiết kiệm trả lãi ngay,FD,SAVINGS,UPFRONT_INT,IND,Khách muốn nhận lãi sớm và giữ gốc đến đáo hạn,0.18,True
+PR022,FD_SAV_PERIODIC,Tiền gửi trả lãi định kỳ,FD,SAVINGS,PERIODIC_INT,IND,Khách cá nhân / tổ chức cần dòng tiền lãi định kỳ,0.18,True
+PR023,FD_SAV_KIDS,Tiết kiệm Măng non,FD,SAVINGS,KIDS,IND,Cha mẹ / người giám hộ muốn tích luỹ dài hạn cho con,0.15,True
+PR024,FD_CD,Chứng chỉ tiền gửi,FD,CERTIFICATE,,IND,"Khách có tiền nhàn rỗi, ưu tiên đầu tư tiền gửi kỳ hạn dài",0.16,True
+PR025,LEND_UNSECURED_PAYROLL,Vay tín chấp theo lương / phân khúc,LENDING,UNSECURED,,IND,Khách cá nhân có thu nhập ổn định / nhận lương hoặc thuộc phân khúc đủ điều kiện,0.3,True
+PR026,LEND_OVERDRAFT_PERSONAL,Thấu chi cá nhân (M-Payroll / M-First),LENDING,OVERDRAFT,,IND,"Khách cá nhân có thu nhập ổn định, cần nguồn tiền dự phòng ngắn hạn",0.25,True
+PR027,LEND_CONSUMER,Vay tiêu dùng,LENDING,CONSUMER,,IND,Khách cá nhân có nhu cầu chi tiêu / mua sắm / kế hoạch cá nhân,0.22,True
+PR028,LEND_HOME_SECURED,Vay mua bất động sản có sổ,LENDING,MORTGAGE,,IND,"Khách có nhu cầu mua nhà, đất hoặc bất động sản",0.2,True
+PR029,LEND_HOME_PROJECT,Vay mua nhà dự án,LENDING,MORTGAGE,PROJECT,IND,Khách mua nhà / căn hộ tại dự án đủ điều kiện MSB,0.16,True
+PR030,LEND_HOME_RENOVATE,Vay xây sửa / hoàn thiện nhà,LENDING,MORTGAGE,RENOVATE,IND,"Khách có nhu cầu xây, sửa hoặc hoàn thiện nhà ở",0.14,True
+PR031,LEND_AUTO_NEW,Vay mua ô tô mới,LENDING,AUTO,NEW,IND,Khách cá nhân có nhu cầu mua xe phục vụ đi lại / gia đình,0.18,True
+PR032,LEND_SECURITIES_PLEDGE,Vay ứng vốn cầm cố giấy tờ có giá,LENDING,PLEDGE,,IND,Khách có sổ tiết kiệm / GTCG cần thanh khoản ngắn hạn,0.15,True
+PR033,LEND_BIZ_WC,Cho vay bổ sung vốn kinh doanh,LENDING,BIZ,WORKING_CAPITAL,SME,Hộ kinh doanh / cá nhân kinh doanh cần vốn lưu động hoặc mở rộng hoạt động,0.28,True
+PR034,LEND_AGRI,Vay sản xuất kinh doanh nông nghiệp,LENDING,BIZ,AGRI,SME,Hộ kinh doanh / cá nhân sản xuất nông nghiệp cần vốn lưu động hoặc đầu tư,0.2,True
+PR035,LEND_OVERDRAFT_BIZ,Thấu chi kinh doanh / chuỗi cung ứng,LENDING,OVERDRAFT,BIZ,SME,"Doanh nghiệp, hộ kinh doanh hoặc nhà phân phối cần vốn lưu động ngắn hạn",0.18,True

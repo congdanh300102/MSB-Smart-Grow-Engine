@@ -8,5 +8,11 @@ __pycache__/
 # Model binaries — regenerate với `py src/train_models.py` (giữ report/metric/png trong models/)
 models/*.joblib
 
-# Dữ liệu (CSV + Parquet) được commit; 4 file lớn theo dõi qua Git LFS (xem .gitattributes).
+# Dữ liệu (CSV + Parquet) được commit; file lớn theo dõi qua Git LFS (xem .gitattributes).
 # Sinh lại toàn bộ: py src/generate_data.py --customers 25000 --seed 42 --casa-days 45 --digital-days 45
+
+# ai_product_fit.csv ~100MB (khách × 35 sản phẩm) — chỉ commit bản parquet (~7MB).
+data/csv/ai_product_fit.csv
+
+# Excel lock files
+~$*
