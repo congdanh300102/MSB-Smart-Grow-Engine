@@ -191,6 +191,22 @@ def build(seed=42):
     dem.to_parquet(os.path.join(PARQUET, "agg_product_demand.parquet"), index=False)
     dem.to_csv(os.path.join(CSV, "agg_product_demand.csv"), index=False)
 
+    # ---- cấu thành propensity 35 sản phẩm (hybrid LR + rule) -------
+    fit["_is_lr"] = is_lr
+    fit["_anchor_lr"] = a
+    comp = (fit.groupby(["product_id", "product_code", "product_group"])
+            .agg(lr_blended=("_is_lr", "max"),
+                 avg_fit_score=("fit_score", "mean"),
+                 avg_anchor_lr=("_anchor_lr", "mean"),
+                 avg_propensity=("propensity", "mean"),
+                 n_eligible=("eligible", "sum")).reset_index())
+    comp["lr_weight"] = np.where(comp.lr_blended, comp.product_group.map(W_LR).fillna(0.0), 0.0)
+    comp["lr_contribution"] = (comp.avg_propensity - comp.avg_fit_score).round(4)
+    for c in ["avg_fit_score", "avg_anchor_lr", "avg_propensity", "lr_weight"]:
+        comp[c] = comp[c].round(4)
+    comp.to_parquet(os.path.join(PARQUET, "agg_product_propensity.parquet"), index=False)
+    comp.to_csv(os.path.join(CSV, "agg_product_propensity.csv"), index=False)
+
     # ---- segment x product affinity matrix -------------------------
     aff = (fit.groupby(["segment", "product_code"]).propensity.mean().round(3)
            .reset_index().pivot(index="product_code", columns="segment", values="propensity"))

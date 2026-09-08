@@ -96,7 +96,7 @@ NEEDED = [
     "ai_model_registry", "ml_propensity_training_set",
     # trang "Sản phẩm & Nhu cầu" — chỉ các bảng nhỏ (bỏ ai_product_fit ~vài triệu dòng)
     "dim_product_catalogue", "ai_product_recommendation_v2", "agg_product_demand",
-    "agg_segment_product_affinity", "fact_customer_product_holding",
+    "agg_segment_product_affinity", "fact_customer_product_holding", "agg_product_propensity",
 ]
 
 
@@ -149,6 +149,7 @@ PRECO = D.get("ai_product_recommendation_v2")
 PDEM = D.get("agg_product_demand")
 PAFF = D.get("agg_segment_product_affinity")
 PHOLD = D.get("fact_customer_product_holding")
+PCOMP = D.get("agg_product_propensity")
 
 PID_NAME = dict(zip(PROD.product_id, PROD.product_name))
 PID_GROUP = dict(zip(PROD.product_id, PROD.product_group))
@@ -623,15 +624,17 @@ elif PAGE.startswith("👤"):
 # ==========================================================================
 elif PAGE.startswith("📊"):
     st.title("Manager Intelligence")
+    st.caption("Toàn bộ trên danh mục 35 sản phẩm MSB (`ai_product_recommendation_v2`).")
 
-    best = SCORE.sort_values("smart_growth_score").groupby("customer_id").tail(1)
+    best = (PRECO[PRECO.priority_rank == 1].copy() if PRECO is not None
+            else SCORE.sort_values("smart_growth_score").groupby("customer_id").tail(1))
+    best = best.merge(CUST[["customer_id", "customer_segment"]], on="customer_id", how="left")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Danh mục khách hàng", f"{N_CUST:,}")
     k2.metric("High opportunities (SGS ≥ 80)", f"{(best.smart_growth_score >= 80).sum():,}")
     k3.metric("Đủ điều kiện tiếp cận", f"{ELIG.is_eligible.sum():,}")
     if FB is not None:
-        k4.metric("Tỉ lệ chuyển đổi (RM feedback)",
-                  f"{FB.converted_flag.mean()*100:.0f}%")
+        k4.metric("Tỉ lệ chuyển đổi (RM feedback)", f"{FB.converted_flag.mean()*100:.0f}%")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -639,12 +642,11 @@ elif PAGE.startswith("📊"):
               .rename_axis("priority").reset_index(name="customers"))
         fig = px.bar(pr, x="priority", y="customers", color="priority",
                      color_discrete_map=PRIORITY_COLOR)
-        fig.update_layout(title="Phân bố Priority (điểm cao nhất / khách)",
+        fig.update_layout(title="Phân bố Priority (cơ hội #1 / khách)",
                           showlegend=False, height=360, xaxis_title="")
         st.plotly_chart(fig, width="stretch")
     with c2:
-        seg = best.merge(CUST[["customer_id", "customer_segment"]], on="customer_id")
-        piv = (seg.groupby("customer_segment").smart_growth_score.mean()
+        piv = (best.groupby("customer_segment").smart_growth_score.mean()
                .sort_values().reset_index())
         fig = px.bar(piv, x="smart_growth_score", y="customer_segment", orientation="h",
                      color_discrete_sequence=[MSB_RED])
@@ -654,22 +656,47 @@ elif PAGE.startswith("📊"):
 
     c3, c4 = st.columns(2)
     with c3:
-        nbp = (RECO[RECO.priority_rank == 1].recommended_product_id.map(PID_NAME)
-               .value_counts().rename_axis("product").reset_index(name="n"))
-        fig = px.pie(nbp, values="n", names="product", color_discrete_sequence=PALETTE, hole=0.5)
-        fig.update_layout(title="Next Best Product #1 — cơ cấu danh mục", height=360)
+        pcol = "product_name" if "product_name" in best.columns else "recommended_product_id"
+        nbp = best[pcol].value_counts()
+        top = nbp.head(9).rename_axis("product").reset_index(name="n")
+        if len(nbp) > 9:
+            top = pd.concat([top, pd.DataFrame([{"product": "Khác", "n": int(nbp.iloc[9:].sum())}])])
+        fig = px.pie(top, values="n", names="product", color_discrete_sequence=PALETTE, hole=0.5)
+        fig.update_layout(title="Next Best Product #1 — cơ cấu (35 SP)", height=380)
         st.plotly_chart(fig, width="stretch")
     with c4:
+        if PDEM is not None:
+            d = (PDEM.groupby("product_code").expected_adopters_90d.sum()
+                 .sort_values(ascending=False).head(12).rename_axis("product").reset_index(name="exp90"))
+            fig = px.bar(d, x="exp90", y="product", orientation="h",
+                         color_discrete_sequence=[MSB_INK])
+            fig.update_layout(title="Dự báo mở mới 90 ngày (top 12)", height=380,
+                              yaxis=dict(autorange="reversed"), yaxis_title="")
+            st.plotly_chart(fig, width="stretch")
+
+    c5, c6 = st.columns(2)
+    with c5:
+        grp = best.get("product_group")
+        if grp is not None:
+            g = grp.value_counts().rename_axis("nhóm").reset_index(name="n")
+            fig = px.bar(g, x="nhóm", y="n", color="nhóm", color_discrete_sequence=PALETTE)
+            fig.update_layout(title="Cơ hội #1 theo nhóm sản phẩm", showlegend=False, height=340)
+            st.plotly_chart(fig, width="stretch")
+    with c6:
         if FB is not None:
             oc = FB.customer_response.value_counts().rename_axis("response").reset_index(name="n")
             fig = px.bar(oc, x="response", y="n", color_discrete_sequence=[MSB_INK])
             fig.update_layout(title="Kết quả hành động RM (feedback loop)",
-                              showlegend=False, height=360, xaxis_title="")
+                              showlegend=False, height=340, xaxis_title="")
             st.plotly_chart(fig, width="stretch")
 
     st.subheader("Xếp hạng chi nhánh theo số cơ hội High")
-    br = (TOP[TOP.priority_level.isin(["Very High", "High"])].groupby("branch_id").size()
-          .sort_values(ascending=False).head(20).rename_axis("branch_id").reset_index(name="n"))
+    src = PRECO if PRECO is not None else TOP
+    hi = src[src.priority_level.isin(["Very High", "High"])]
+    if "branch_id" not in hi.columns:
+        hi = hi.merge(CUST[["customer_id", "branch_id"]], on="customer_id", how="left")
+    br = (hi.groupby("branch_id").size().sort_values(ascending=False).head(20)
+          .rename_axis("branch_id").reset_index(name="n"))
     fig = px.bar(br, x="branch_id", y="n", color_discrete_sequence=[MSB_RED])
     fig.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="cơ hội High")
     st.plotly_chart(fig, width="stretch")
@@ -679,15 +706,36 @@ elif PAGE.startswith("📊"):
 # PAGE 6 — MODEL
 # ==========================================================================
 elif PAGE.startswith("🤖"):
-    st.title("Mô hình Product Propensity — Logistic Regression")
-    st.markdown(r"$Z = b + w_1 X_1 + w_2 X_2 + w_3 X_3 + w_4 X_4 + w_5 X_5 + w_6 X_6 \quad;\quad "
-                r"P = \dfrac{1}{1+e^{-Z}}$")
-    st.caption("1 model / sản phẩm mục tiêu · feature X1..X6 theo tài liệu mục a. · "
-               "train trên tệp chưa sở hữu, nhãn = mở sản phẩm trong 90 ngày.")
+    st.title("Mô hình Propensity — Hybrid (Logistic Regression + Rule fit)")
+    st.markdown(
+        r"$P_{\text{sp}} = w\cdot P_{\text{LR}}(\text{nhóm neo}) + (1-w)\cdot \text{fit\_score}(\text{rule})$"
+        "  \n"
+        r"$P_{\text{LR}} = \sigma(b + \sum_i w_i X_i)$  — 6 mô hình neo: Thẻ tín dụng · Vay · "
+        "Tiền gửi · Đầu tư ($w=0.45$).  31 sản phẩm còn lại: $w=0$ → chỉ rule fit theo "
+        "\"Khách hàng/Nhu cầu phù hợp\".")
+
+    if PCOMP is not None:
+        st.subheader("Cấu thành propensity — 35 sản phẩm MSB")
+        cc = PCOMP.copy()
+        cc["kiểu"] = np.where(cc.lr_blended, "LR + rule (w=0.45)", "chỉ rule (w=0)")
+        m = cc.melt(id_vars=["product_code", "product_group", "kiểu"],
+                    value_vars=["avg_fit_score", "avg_propensity"],
+                    var_name="chỉ số", value_name="giá trị")
+        m["chỉ số"] = m["chỉ số"].map({"avg_fit_score": "fit_score (rule)",
+                                       "avg_propensity": "propensity (hybrid)"})
+        fig = px.bar(m.sort_values("giá trị"), x="giá trị", y="product_code", color="chỉ số",
+                     barmode="group", color_discrete_sequence=[MSB_INK, MSB_RED], height=760)
+        fig.update_layout(title="fit_score (rule) vs propensity (hybrid) theo sản phẩm",
+                          yaxis_title="")
+        st.plotly_chart(fig, width="stretch")
+        st.caption("Chênh lệch propensity − fit_score = đóng góp của mô hình LR nhóm neo "
+                   "(âm khi P_LR < fit, dương khi P_LR > fit).")
 
     if METRIC is None or COEF is None:
-        st.warning("Chưa có artefact model. Chạy `py src/train_models.py --apply`.")
+        st.info("Chưa có artefact LR (`py src/train_models.py --apply`) — chỉ hiển thị phần hybrid ở trên.")
         st.stop()
+    st.divider()
+    st.subheader("4 mô hình neo — Logistic Regression (doc mục a., feature X1..X6)")
 
     mt = METRIC.copy()
     mt["product"] = mt.product_id.map(PID_NAME)

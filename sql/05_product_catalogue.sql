@@ -8,7 +8,8 @@
 SET search_path TO msb_sge;
 
 DROP TABLE IF EXISTS ai_product_recommendation_v2, ai_product_fit,
-    fact_customer_product_holding, agg_product_demand, dim_product_catalogue CASCADE;
+    fact_customer_product_holding, agg_product_demand, agg_product_propensity,
+    dim_product_catalogue CASCADE;
 
 CREATE TABLE dim_product_catalogue (
     product_id       VARCHAR(12) PRIMARY KEY,
@@ -74,6 +75,19 @@ CREATE TABLE ai_product_recommendation_v2 (
     PRIMARY KEY (customer_id, priority_rank)
 );
 
+CREATE TABLE agg_product_propensity (
+    product_id       VARCHAR(12) PRIMARY KEY REFERENCES dim_product_catalogue(product_id),
+    product_code     VARCHAR(40),
+    product_group    VARCHAR(20),
+    lr_blended       BOOLEAN,        -- có blend Logistic Regression nhóm neo?
+    lr_weight        DECIMAL(4,2),   -- w (0 = chỉ rule, 0.45 = blend)
+    avg_fit_score    DECIMAL(6,4),   -- điểm rule "khách hàng phù hợp" bình quân
+    avg_anchor_lr    DECIMAL(6,4),   -- P_LR nhóm neo bình quân
+    avg_propensity   DECIMAL(6,4),   -- propensity hybrid bình quân
+    lr_contribution  DECIMAL(7,4),   -- avg_propensity - avg_fit_score
+    n_eligible       INTEGER
+);
+
 CREATE TABLE agg_product_demand (
     product_id            VARCHAR(12) REFERENCES dim_product_catalogue(product_id),
     product_code          VARCHAR(40),
@@ -94,6 +108,7 @@ CREATE TABLE agg_product_demand (
 \copy ai_product_fit (customer_id,product_id,product_code,product_group,eligible,held,fit_score,propensity,smart_growth_score,priority_level,reason_1,reason_2,reason_3) FROM '/data/csv/ai_product_fit.csv' WITH (FORMAT csv, HEADER true, NULL '');
 \copy ai_product_recommendation_v2 (customer_id,priority_rank,product_id,product_code,product_name,product_group,propensity,fit_score,smart_growth_score,priority_level,reason_1,reason_2,reason_3,expected_conversion,recommended_action,recommended_channel,recommended_timing,message_angle,status,branch_id,branch_product_rank) FROM '/data/csv/ai_product_recommendation_v2.csv' WITH (FORMAT csv, HEADER true, NULL '');
 \copy agg_product_demand (product_id,product_code,product_group,segment,eligible_customers,avg_propensity,high_propensity,current_holders,expected_adopters_90d,expected_adopters_30d,expected_adopters_60d) FROM '/data/csv/agg_product_demand.csv' WITH (FORMAT csv, HEADER true, NULL '');
+\copy agg_product_propensity (product_id,product_code,product_group,lr_blended,avg_fit_score,avg_anchor_lr,avg_propensity,n_eligible,lr_weight,lr_contribution) FROM '/data/csv/agg_product_propensity.csv' WITH (FORMAT csv, HEADER true, NULL '');
 
 CREATE INDEX ix_pfit_prod ON ai_product_fit(product_id);
 CREATE INDEX ix_preco_cust ON ai_product_recommendation_v2(customer_id);

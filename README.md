@@ -38,11 +38,16 @@ mỗi sản phẩm có **rule "khách hàng phù hợp"** + **hard-gate** map t�
 
 `src/product_analysis.py` → propensity **hybrid** = LR (nhóm neo: thẻ/vay/tiền gửi) + rule fit,
 Smart Growth Score theo sản phẩm, rồi:
-- **Next Best Product** — top-6 sản phẩm phù hợp nhất mỗi khách (loại sản phẩm đã có / cùng nhóm), kèm lý do.
+- **Next Best Product / Action** — top-6 sản phẩm phù hợp nhất mỗi khách (loại SP đã có / cùng nhóm),
+  kèm `recommended_action / channel / timing / message_angle / status / branch_product_rank`.
 - **Dự báo cầu 90 ngày** theo sản phẩm × phân khúc (`agg_product_demand`).
-- **Ma trận phân khúc × sản phẩm** (`agg_segment_product_affinity`).
-- **Khoảng trống danh mục** (portfolio gap) theo nhóm.
-- Báo cáo: `models/product_analysis_report.md` · App Streamlit: trang **"Sản phẩm & Nhu cầu"**.
+- **Cấu thành propensity** hybrid theo từng SP (`agg_product_propensity`: `lr_weight`, `avg_fit_score`, `lr_contribution`).
+- **Ma trận phân khúc × sản phẩm** (`agg_segment_product_affinity`) · **khoảng trống danh mục** theo nhóm.
+- Báo cáo: `models/product_analysis_report.md`.
+
+**Toàn bộ app Streamlit chạy trên 35 SP**: RM Opportunity Desk (chọn Nhóm→SP, Top-N/chi nhánh),
+Customer 360, 12 Actions (4–9), Manager Intelligence, và trang "Mô hình Propensity" (phần
+hybrid + 4 mô hình neo LR). Xem `sql/05_product_catalogue.sql` cho schema + view `v_top_opportunities_v2`.
 
 ```
 py src/backfill_product_signals.py     # thêm cờ tín hiệu vào feature mart đã có (idempotent)
