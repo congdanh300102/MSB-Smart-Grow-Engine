@@ -64,6 +64,13 @@ CREATE TABLE ai_product_recommendation_v2 (
     reason_2            VARCHAR(80),
     reason_3            VARCHAR(80),
     expected_conversion DECIMAL(6,4),
+    recommended_action  VARCHAR(30),   -- RM_CALL / RM_ASSISTED_MESSAGE / IN_APP / NURTURE / NO_CONTACT
+    recommended_channel VARCHAR(20),
+    recommended_timing  VARCHAR(30),
+    message_angle       VARCHAR(200),
+    status              VARCHAR(20),    -- NEW / SENT / RM_APPROVAL / BLOCKED
+    branch_id           VARCHAR(20),
+    branch_product_rank INTEGER,
     PRIMARY KEY (customer_id, priority_rank)
 );
 
@@ -85,12 +92,26 @@ CREATE TABLE agg_product_demand (
 \copy dim_product_catalogue (product_id,product_code,product_name,product_group,subgroup,product_tier,customer_type,target_need,base_propensity,active_flag) FROM '/data/csv/dim_product_catalogue.csv' WITH (FORMAT csv, HEADER true, NULL '');
 \copy fact_customer_product_holding (customer_id,product_id,open_date,status,balance) FROM '/data/csv/fact_customer_product_holding.csv' WITH (FORMAT csv, HEADER true, NULL '');
 \copy ai_product_fit (customer_id,product_id,product_code,product_group,eligible,held,fit_score,propensity,smart_growth_score,priority_level,reason_1,reason_2,reason_3) FROM '/data/csv/ai_product_fit.csv' WITH (FORMAT csv, HEADER true, NULL '');
-\copy ai_product_recommendation_v2 (customer_id,priority_rank,product_id,product_code,product_name,product_group,propensity,fit_score,smart_growth_score,priority_level,reason_1,reason_2,reason_3,expected_conversion) FROM '/data/csv/ai_product_recommendation_v2.csv' WITH (FORMAT csv, HEADER true, NULL '');
+\copy ai_product_recommendation_v2 (customer_id,priority_rank,product_id,product_code,product_name,product_group,propensity,fit_score,smart_growth_score,priority_level,reason_1,reason_2,reason_3,expected_conversion,recommended_action,recommended_channel,recommended_timing,message_angle,status,branch_id,branch_product_rank) FROM '/data/csv/ai_product_recommendation_v2.csv' WITH (FORMAT csv, HEADER true, NULL '');
 \copy agg_product_demand (product_id,product_code,product_group,segment,eligible_customers,avg_propensity,high_propensity,current_holders,expected_adopters_90d,expected_adopters_30d,expected_adopters_60d) FROM '/data/csv/agg_product_demand.csv' WITH (FORMAT csv, HEADER true, NULL '');
 
 CREATE INDEX ix_pfit_prod ON ai_product_fit(product_id);
 CREATE INDEX ix_preco_cust ON ai_product_recommendation_v2(customer_id);
+CREATE INDEX ix_preco_prod ON ai_product_recommendation_v2(product_id);
 ANALYZE;
+
+-- RM Opportunity Desk: Top-N khách hàng / chi nhánh / sản phẩm (35 SP), đã qua
+-- Decision Gate 1 (eligible) + loại sản phẩm đã sở hữu, sort Smart Growth Score DESC.
+CREATE OR REPLACE VIEW v_top_opportunities_v2 AS
+SELECT r.branch_id, r.product_id, r.product_code, r.product_group, p.product_name,
+       r.customer_id, c.customer_segment, c.age_group, c.income_band,
+       r.smart_growth_score, r.priority_level, r.propensity, r.expected_conversion,
+       r.recommended_action, r.recommended_channel, r.recommended_timing, r.message_angle,
+       r.status, r.branch_product_rank
+FROM ai_product_recommendation_v2 r
+JOIN dim_product_catalogue p ON p.product_id = r.product_id
+JOIN dim_customer c ON c.customer_id = r.customer_id
+WHERE r.status <> 'BLOCKED';
 
 -- ---------------------------------------------------------------------
 -- Truy vấn mẫu

@@ -125,6 +125,7 @@ def build(seed=42):
     ai_fit.to_csv(os.path.join(CSV, "ai_product_fit.csv"), index=False)
 
     # ---- recommendations: top-6 sp phù hợp nhất, loại sp đã có / cùng nhóm ----
+    cust_i = mart.set_index("customer_id")
     cand = fit[fit.eligible & ~fit.held & ~fit.held_group].copy()
     cand = cand.sort_values(["customer_id", "propensity"], ascending=[True, False])
     cand["priority_rank"] = cand.groupby("customer_id").cumcount() + 1
@@ -134,8 +135,40 @@ def build(seed=42):
         "reason_1", "reason_2", "reason_3"]].copy()
     reco["expected_conversion"] = np.round(
         np.clip(reco.propensity * 0.75 * (1 + (reco.priority_rank == 1) * 0.15), 0.01, 0.95), 4)
+
+    # Next Best Action / Channel / Timing / Message — theo Action 5,6,7 của hành trình AI
+    seg = reco.customer_id.map(cust_i["segment"]).fillna("MASS")
+    dig = reco.customer_id.map(cust_i["digital_engagement_score"]).fillna(0)
+    supp = reco.customer_id.map(cust_i.get("recent_rejection_30d_flag", pd.Series(dtype=bool))).fillna(False) \
+        | reco.customer_id.map(cust_i.get("serious_complaint_15d", pd.Series(dtype=bool))).fillna(False)
+    hi = reco.priority_level.isin(["Very High", "High"])
+    affluent = seg.isin(["AFFLUENT", "PRIVATE"])
+    reco["recommended_action"] = np.select(
+        [supp, affluent & (reco.priority_rank == 1), affluent,
+         (dig >= 45) & hi, hi],
+        ["NO_CONTACT", "RM_CALL", "RM_ASSISTED_MESSAGE", "IN_APP", "RM_ASSISTED_MESSAGE"],
+        default="NURTURE")
+    reco["recommended_channel"] = np.select(
+        [reco.recommended_action.isin(["RM_CALL", "RM_ASSISTED_MESSAGE"]),
+         reco.recommended_action.eq("IN_APP"), reco.recommended_action.eq("NURTURE")],
+        ["RM_CALL", "IN_APP", "EMAIL"], default="SMS")
+    reco["recommended_timing"] = np.select(
+        [(reco.priority_rank == 1) & (reco.smart_growth_score >= 80),
+         reco.priority_rank == 1, reco.priority_rank == 2],
+        ["Trong vòng 48 giờ", "Trong tuần này", "Trong 2 tuần tới"], default="Nurture 30 ngày")
+    ANGLE = {"CARD": "Hoàn tiền + ưu đãi chi tiêu, phù hợp mức chi tiêu và thu nhập.",
+             "CASA": "Tài khoản/dịch vụ tối ưu dòng tiền và giao dịch hằng ngày.",
+             "FD": "Cộng thêm lãi suất, tối ưu dòng tiền nhàn rỗi.",
+             "LENDING": "Lãi suất ưu đãi, duyệt nhanh, phù hợp nhu cầu vốn."}
+    reco["message_angle"] = reco.product_group.map(ANGLE)
+    reco["status"] = np.where(supp, "BLOCKED",
+                     np.where(affluent | (reco.recommended_action == "RM_CALL"), "RM_APPROVAL",
+                     np.where(hi, "SENT", "NEW")))
+    reco["branch_id"] = reco.customer_id.map(cust_i["branch_id"])
+    reco["branch_product_rank"] = (reco.sort_values("smart_growth_score", ascending=False)
+                                   .groupby(["branch_id", "product_id"]).cumcount() + 1)
     reco.to_parquet(os.path.join(PARQUET, "ai_product_recommendation_v2.parquet"), index=False)
-    reco.to_csv(os.path.join(CSV, "ai_product_recommendation_v2.csv"), index=False)
+    reco.drop(columns=[]).to_csv(os.path.join(CSV, "ai_product_recommendation_v2.csv"), index=False)
 
     # ---- demand forecast per product x segment ----------------------
     seg = mart.set_index("customer_id")["segment"]

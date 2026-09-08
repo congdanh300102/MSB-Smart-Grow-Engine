@@ -393,18 +393,22 @@ elif PAGE.startswith("🧭"):
         st.plotly_chart(fig, width="stretch")
 
     elif step == "4":
-        cid = st.selectbox("Khách hàng", RECO.customer_id.drop_duplicates().head(500))
-        r = RECO[RECO.customer_id == cid].sort_values("priority_rank")
-        r = r.merge(SCORE[["score_id", "smart_growth_score", "propensity_probability"]], on="score_id")
+        R = PRECO if PRECO is not None else RECO
+        cid = st.selectbox("Khách hàng", R.customer_id.drop_duplicates().head(500))
+        r = R[R.customer_id == cid].sort_values("priority_rank")
         for _, x in r.iterrows():
-            st.markdown(f"**#{int(x.priority_rank)} · {PID_NAME.get(x.recommended_product_id,'')}**  "
-                        f"— Propensity **{x.propensity_probability*100:.0f}%** · "
-                        f"SGS {x.smart_growth_score:.0f} · exp. conversion {x.expected_conversion*100:.0f}%")
-            st.caption(x.message_angle)
+            name = x.get("product_name") or PID_NAME.get(x.get("recommended_product_id"), "")
+            p = x.get("propensity", x.get("expected_conversion", 0))
+            st.markdown(f"**#{int(x.priority_rank)} · {name}**  — Propensity **{p*100:.0f}%** · "
+                        f"SGS {x.get('smart_growth_score', 0):.0f} · "
+                        f"exp. conversion {x.expected_conversion*100:.0f}%")
+            st.caption(x.get("message_angle", ""))
+        if PRECO is not None:
+            st.caption("Xếp hạng trên toàn bộ **35 sản phẩm MSB** (đã loại sản phẩm khách đã sở hữu).")
 
     elif step == "5":
-        t = RECO[RECO.priority_rank == 1].merge(
-            CUST[["customer_id", "customer_segment"]], on="customer_id")
+        R = PRECO if PRECO is not None else RECO
+        t = R[R.priority_rank == 1].merge(CUST[["customer_id", "customer_segment"]], on="customer_id")
         piv = t.groupby(["customer_segment", "recommended_action"]).size().reset_index(name="n")
         fig = px.bar(piv, x="customer_segment", y="n", color="recommended_action",
                      color_discrete_sequence=PALETTE)
@@ -412,10 +416,11 @@ elif PAGE.startswith("🧭"):
         st.plotly_chart(fig, width="stretch")
 
     elif step == "6":
-        t = RECO[(RECO.priority_rank == 1) & (~RECO.suppression_flag)]
+        R = PRECO if PRECO is not None else RECO
+        t = R[R.priority_rank == 1]
+        t = t[t.status != "BLOCKED"] if "status" in t.columns else t
         piv = t.groupby(["recommended_channel", "recommended_timing"]).agg(
-            n=("recommendation_id", "count"),
-            exp=("expected_conversion", "mean")).reset_index()
+            n=("customer_id", "count"), exp=("expected_conversion", "mean")).reset_index()
         fig = px.scatter(piv, x="recommended_timing", y="recommended_channel", size="n",
                          color="exp", color_continuous_scale="Reds", size_max=48)
         fig.update_layout(title="Kênh × thời điểm (size = số lượng, màu = expected conversion)",
@@ -423,16 +428,22 @@ elif PAGE.startswith("🧭"):
         st.plotly_chart(fig, width="stretch")
 
     elif step == "7":
+        R = PRECO if PRECO is not None else RECO
         st.write("Message angle được GenAI sinh từ structured context + template kiểm soát:")
-        st.dataframe(RECO[["customer_id", "recommended_product_id", "recommended_channel",
-                           "message_angle"]].head(25)
-                     .assign(recommended_product_id=lambda d: d.recommended_product_id.map(PID_NAME)),
-                     width="stretch", hide_index=True)
+        if PRECO is not None:
+            st.dataframe(R[["customer_id", "product_name", "recommended_channel", "message_angle"]]
+                         .head(25), width="stretch", hide_index=True)
+        else:
+            st.dataframe(R[["customer_id", "recommended_product_id", "recommended_channel", "message_angle"]]
+                         .head(25).assign(recommended_product_id=lambda d: d.recommended_product_id.map(PID_NAME)),
+                         width="stretch", hide_index=True)
 
     elif step in ("8", "9"):
-        piv = RECO[RECO.priority_rank == 1].groupby(["status", "suppression_flag"]).size() \
-            .reset_index(name="n")
-        fig = px.bar(piv, x="status", y="n", color="suppression_flag",
+        R = PRECO if PRECO is not None else RECO
+        t = R[R.priority_rank == 1].copy()
+        t["blocked"] = t.status.eq("BLOCKED") if "status" in t.columns else t.get("suppression_flag", False)
+        piv = t.groupby(["status", "blocked"]).size().reset_index(name="n")
+        fig = px.bar(piv, x="status", y="n", color="blocked",
                      color_discrete_sequence=[MSB_INK, MSB_RED])
         fig.update_layout(title="Trạng thái message trước khi gửi (Gate 2 & 3)", height=380)
         st.plotly_chart(fig, width="stretch")
@@ -476,40 +487,54 @@ elif PAGE.startswith("🧭"):
 elif PAGE.startswith("🎯"):
     st.title("RM Opportunity Desk")
     st.caption("2 tầng lọc: (1) đủ điều kiện kinh doanh — Decision Gate 1  →  "
-               "(2) Smart Growth Score DESC → Top 20 / chi nhánh / sản phẩm.")
+               "(2) Smart Growth Score DESC → Top N / chi nhánh / sản phẩm. "
+               "Danh mục: 35 sản phẩm MSB chuẩn hoá.")
 
-    c1, c2, c3 = st.columns(3)
-    grp = c1.selectbox("Sản phẩm", list(TARGET_PRODUCTS),
-                       format_func=lambda g: f"{GROUP_LABEL[g]} — {PID_NAME[TARGET_PRODUCTS[g]]}")
-    branches = ["(Toàn hàng)"] + sorted(TOP.branch_id.dropna().unique())
+    if PRECO is None or CAT is None:
+        st.warning("Chưa có `ai_product_recommendation_v2`. Chạy `py src/product_analysis.py`.")
+        st.stop()
+
+    prods = CAT.sort_values(["product_group", "product_name"])
+    GLAB = {"CARD": "Thẻ", "CASA": "Tài khoản", "FD": "Tiền gửi", "LENDING": "Cho vay"}
+    opt = list(prods.product_id)
+    pname = dict(zip(prods.product_id, prods.product_name))
+    pgrp = dict(zip(prods.product_id, prods.product_group))
+
+    c0, c1, c2, c3 = st.columns([1, 2, 2, 1.4])
+    gsel = c0.selectbox("Nhóm", ["(tất cả)"] + list(GLAB), format_func=lambda g: GLAB.get(g, g))
+    opt2 = opt if gsel == "(tất cả)" else [p for p in opt if pgrp[p] == gsel]
+    pid = c1.selectbox("Sản phẩm", opt2,
+                       format_func=lambda p: f"{GLAB.get(pgrp[p], pgrp[p])} · {pname[p]}")
+    branches = ["(Toàn hàng)"] + sorted(PRECO.branch_id.dropna().unique())
     branch = c2.selectbox("Chi nhánh", branches)
     topn = c3.slider("Top N", 5, 50, 20, 5)
 
-    view = TOP[TOP.product_group == grp].copy()
-    if branch != "(Toàn hàng)":
-        view = view[view.branch_id == branch]
-    view = view.sort_values("smart_growth_score", ascending=False).head(topn)
+    pool = PRECO[PRECO.product_id == pid].copy()
+    pool = pool.merge(CUST[["customer_id", "customer_segment"]], on="customer_id", how="left")
+    view = pool if branch == "(Toàn hàng)" else pool[pool.branch_id == branch]
+    view = view.sort_values("smart_growth_score", ascending=False).head(topn).reset_index(drop=True)
+    view["#"] = view.index + 1
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Cơ hội đủ điều kiện", f"{(TOP.product_group == grp).sum():,}")
+    k1.metric("Cơ hội (đủ ĐK, chưa sở hữu)", f"{len(pool):,}")
     k2.metric("Very High / High", f"{view.priority_level.isin(['Very High','High']).sum()}")
-    k3.metric("SGS bình quân (Top N)", f"{view.smart_growth_score.mean():.0f}")
-    k4.metric("Propensity bình quân", f"{view.propensity_probability.mean()*100:.0f}%")
+    k3.metric("SGS bình quân (Top N)", f"{view.smart_growth_score.mean():.0f}" if len(view) else "—")
+    k4.metric("Propensity bình quân", f"{view.propensity.mean()*100:.0f}%" if len(view) else "—")
 
     disp = view.assign(
-        Propensity=lambda d: (d.propensity_probability * 100).round(0),
+        Propensity=lambda d: (d.propensity * 100).round(0),
         SGS=lambda d: d.smart_growth_score.round(0),
         ExpConv=lambda d: (d.expected_conversion * 100).round(0),
-    )[["branch_product_rank", "customer_id", "customer_segment", "SGS", "priority_level",
-       "Propensity", "ExpConv", "recommended_action", "recommended_channel",
-       "recommended_timing", "message_angle"]].rename(columns={
-        "branch_product_rank": "#", "customer_segment": "Segment",
-        "priority_level": "Priority", "recommended_action": "Next Best Action",
-        "recommended_channel": "Kênh", "recommended_timing": "Thời điểm",
-        "message_angle": "Message angle"})
+        Reason=lambda d: d[["reason_1", "reason_2"]].apply(
+            lambda r: " · ".join(x for x in r if isinstance(x, str)), axis=1),
+    )[["#", "customer_id", "customer_segment", "SGS", "priority_level", "Propensity", "ExpConv",
+       "recommended_action", "recommended_channel", "recommended_timing", "Reason", "status"]].rename(columns={
+        "customer_segment": "Segment", "priority_level": "Priority",
+        "recommended_action": "Next Best Action", "recommended_channel": "Kênh",
+        "recommended_timing": "Thời điểm", "status": "Trạng thái"})
     st.dataframe(disp, width="stretch", hide_index=True, height=560)
     st.download_button("Tải danh sách (CSV)", disp.to_csv(index=False).encode("utf-8"),
-                       f"top_{grp}_{branch}.csv", "text/csv")
+                       f"top_{pid}_{branch}.csv", "text/csv")
 
 
 # ==========================================================================
@@ -517,7 +542,8 @@ elif PAGE.startswith("🎯"):
 # ==========================================================================
 elif PAGE.startswith("👤"):
     st.title("Customer 360")
-    default_list = TOP.customer_id.drop_duplicates().head(300).tolist()
+    _src = PRECO if PRECO is not None else TOP
+    default_list = _src.customer_id.drop_duplicates().head(300).tolist()
     cid = st.selectbox("Chọn khách hàng", default_list
                        + [c for c in MART.customer_id.head(300) if c not in default_list])
 
@@ -526,6 +552,8 @@ elif PAGE.startswith("👤"):
     sc = SCORE[SCORE.customer_id == cid].copy()
     sc["product"] = sc.product_id.map(PID_NAME)
     rc = RECO[RECO.customer_id == cid].sort_values("priority_rank")
+    prc = (PRECO[PRECO.customer_id == cid].sort_values("priority_rank")
+           if PRECO is not None else pd.DataFrame())
 
     a, b, c, d = st.columns(4)
     a.metric("Phân khúc", prof.customer_segment)
@@ -535,12 +563,21 @@ elif PAGE.startswith("👤"):
 
     left, right = st.columns([1, 1])
     with left:
-        st.subheader("AI Opportunity Score theo sản phẩm")
-        fig = px.bar(sc.sort_values("smart_growth_score"), x="smart_growth_score", y="product",
-                     orientation="h", color="smart_growth_score",
-                     color_continuous_scale="Reds", text="priority_level")
-        fig.update_layout(height=300, showlegend=False, xaxis_title="Smart Growth Score")
-        st.plotly_chart(fig, width="stretch")
+        st.subheader("Mức độ phù hợp theo sản phẩm (35 SP MSB)")
+        if not prc.empty:
+            b = prc.sort_values("smart_growth_score")
+            fig = px.bar(b, x="smart_growth_score", y="product_name", orientation="h",
+                         color="smart_growth_score", color_continuous_scale="Reds",
+                         text="priority_level")
+            fig.update_layout(height=320, showlegend=False, xaxis_title="Smart Growth Score",
+                              yaxis_title="")
+            st.plotly_chart(fig, width="stretch")
+        else:
+            fig = px.bar(sc.sort_values("smart_growth_score"), x="smart_growth_score", y="product",
+                         orientation="h", color="smart_growth_score",
+                         color_continuous_scale="Reds", text="priority_level")
+            fig.update_layout(height=300, showlegend=False, xaxis_title="Smart Growth Score")
+            st.plotly_chart(fig, width="stretch")
 
         best_pid = sc.sort_values("smart_growth_score").iloc[-1]
         radar = best_pid[["product_propensity_score", "customer_value_score", "intent_signal_score",
@@ -554,12 +591,18 @@ elif PAGE.startswith("👤"):
 
     with right:
         st.subheader("Next Best Product / Action")
-        for _, x in rc.iterrows():
+        _rows = prc if not prc.empty else rc.assign(
+            product_name=rc.recommended_product_id.map(PID_NAME))
+        for _, x in _rows.iterrows():
             tag = "🔴" if x.priority_rank == 1 else "▫️"
-            st.markdown(f"{tag} **#{int(x.priority_rank)} {PID_NAME.get(x.recommended_product_id,'')}** — "
+            reasons = " · ".join(str(x[c]) for c in ("reason_1", "reason_2", "reason_3")
+                                 if c in x.index and isinstance(x[c], str))
+            st.markdown(f"{tag} **#{int(x.priority_rank)} {x.get('product_name','')}** — "
                         f"{x.recommended_action} · {x.recommended_channel} · {x.recommended_timing}")
-            st.caption(f"{x.message_angle}  \n*Expected conversion {x.expected_conversion*100:.0f}% · "
-                       f"status {x.status}*")
+            st.caption(f"{x.get('message_angle','')}  \n"
+                       f"*Propensity {x.get('propensity', x.get('expected_conversion',0))*100:.0f}% · "
+                       f"Expected conversion {x.expected_conversion*100:.0f}% · status {x.get('status','')}*"
+                       + (f"  \nLý do: {reasons}" if reasons else ""))
 
         st.subheader("Why this customer  (đóng góp logit theo feature)")
         best_sid = sc.sort_values("smart_growth_score").iloc[-1]["score_id"]
