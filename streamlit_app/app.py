@@ -101,12 +101,16 @@ NEEDED = [
 
 
 @st.cache_data(show_spinner="Đang tải dữ liệu…")
-def load():
-    d = {}
-    for name in NEEDED:
+def load(needed):
+    d, missing = {}, []
+    for name in needed:
         p = PARQUET / f"{name}.parquet"
         if p.exists():
             d[name] = pd.read_parquet(p)
+        else:
+            missing.append(name)
+    d["__missing__"] = missing
+    d["__available__"] = sorted(p.stem for p in PARQUET.glob("*.parquet"))
     return d
 
 
@@ -117,19 +121,19 @@ def load_model_report():
 
 
 try:
-    D = load()
+    D = load(tuple(NEEDED))          # tuple(NEEDED) trong cache-key → đổi NEEDED là bust cache
 except Exception as e:  # pragma: no cover
     st.error(f"Không đọc được data/parquet/. Chạy `py src/generate_data.py` + "
              f"`py src/train_models.py --apply` trước.\n\n{e}")
     st.stop()
 
-_missing = [t for t in ("customer_360_feature_mart", "ai_customer_score",
-                        "ai_recommendation", "ai_score_reason", "dim_customer",
-                        "dim_product") if t not in D]
+_core = ("customer_360_feature_mart", "ai_customer_score", "ai_recommendation",
+         "ai_score_reason", "dim_customer", "dim_product")
+_missing = [t for t in _core if t not in D]
 if _missing:
-    st.error("Thiếu file dữ liệu: " + ", ".join(f"`data/parquet/{m}.parquet`" for m in _missing)
-             + ".\n\nNếu clone bằng Git LFS chưa `git lfs pull`, hoặc chưa chạy "
-             "`py src/generate_data.py` + `py src/train_models.py --apply`.")
+    st.error("Thiếu file dữ liệu lõi: " + ", ".join(f"`{m}.parquet`" for m in _missing)
+             + ".\n\nCó trong repo: " + ", ".join(D.get("__available__", []) or ["(không có file nào)"])
+             + ".\n\nTrên Streamlit Cloud: mở menu **⋮ → Reboot app** để pull commit mới nhất.")
     st.stop()
 
 MART = D["customer_360_feature_mart"]
@@ -492,7 +496,9 @@ elif PAGE.startswith("🎯"):
                "Danh mục: 35 sản phẩm MSB chuẩn hoá.")
 
     if PRECO is None or CAT is None:
-        st.warning("Chưa có `ai_product_recommendation_v2`. Chạy `py src/product_analysis.py`.")
+        st.warning("Chưa nạp được `ai_product_recommendation_v2` / `dim_product_catalogue`.\n\n"
+                   "File có trong data/parquet/: " + ", ".join(D.get("__available__", [])) + "\n\n"
+                   "→ Chạy `py src/product_analysis.py`, hoặc trên Streamlit Cloud: **⋮ → Reboot app**.")
         st.stop()
 
     prods = CAT.sort_values(["product_group", "product_name"])
@@ -799,7 +805,9 @@ elif PAGE.startswith("🛍️"):
                "'Khách hàng/Nhu cầu phù hợp'.")
 
     if PRECO is None or CAT is None or PDEM is None:
-        st.warning("Chưa có dữ liệu phân tích sản phẩm. Chạy `py src/product_analysis.py`.")
+        st.warning("Chưa nạp được dữ liệu phân tích sản phẩm.\n\n"
+                   "File có trong data/parquet/: " + ", ".join(D.get("__available__", [])) + "\n\n"
+                   "→ Chạy `py src/product_analysis.py`, hoặc trên Streamlit Cloud: **⋮ → Reboot app**.")
         st.stop()
 
     tab1, tab2, tab3, tab4 = st.tabs([
