@@ -87,33 +87,72 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# App chỉ cần các bảng feature / score / decision / model — KHÔNG nạp các bảng
-# raw fact theo-ngày (fact_casa_daily ~1M dòng...) để không vượt RAM khi deploy.
-NEEDED = [
-    "customer_360_feature_mart", "ai_customer_score", "ai_recommendation",
-    "ai_score_reason", "dim_customer", "dim_product", "rm_action_feedback",
-    "fact_campaign", "ai_model_coefficient", "ai_model_metric",
-    "ai_model_registry", "ml_propensity_training_set",
-    # trang "Sản phẩm & Nhu cầu" — chỉ các bảng nhỏ (bỏ ai_product_fit ~vài triệu dòng)
-    "dim_product_catalogue", "ai_product_recommendation_v2", "agg_product_demand",
-    "agg_segment_product_affinity", "fact_customer_product_holding", "agg_product_propensity",
-    # trang "AI Agent · Feedback"
-    "rm_feedback_ai", "ai_agent_review", "ai_model_adjustment",
-]
+# ── Bộ nhớ Streamlit Cloud (~1GB) ────────────────────────────────────────
+# Chỉ nạp sẵn các bảng dùng ở nhiều trang; các bảng lớn ít dùng -> nạp lười
+# (get_df) đúng trang cần. Mọi frame được downcast float32/int32/category.
+def _shrink(df: pd.DataFrame) -> pd.DataFrame:
+    n = max(len(df), 1)
+    for c in df.columns:
+        s = df[c]
+        dt = str(s.dtype)
+        if dt == "float64":
+            df[c] = s.astype("float32")
+        elif dt == "int64" and s.abs().max() < 2_000_000_000:
+            df[c] = s.astype("int32")
+        elif dt in ("object", "str", "string") and s.nunique(dropna=False) < n * 0.6:
+            df[c] = s.astype("category")   # str-dtype mặc định của pandas 3 vẫn tốn RAM
+    return df
+
+
+# nạp sẵn (small / dùng nhiều); ai_product_recommendation_v2 bỏ cột text nặng
+EAGER = {
+    "customer_360_feature_mart": None, "ai_customer_score": None, "dim_customer": None,
+    "dim_product": None, "rm_action_feedback": None,
+    "ai_model_coefficient": None, "ai_model_metric": None, "ai_model_registry": None,
+    "dim_product_catalogue": None, "agg_product_demand": None,
+    "agg_segment_product_affinity": None, "fact_customer_product_holding": None,
+    "agg_product_propensity": None, "ai_agent_review": None, "ai_model_adjustment": None,
+    "ai_product_recommendation_v2": [
+        "customer_id", "priority_rank", "product_id", "product_code", "product_name",
+        "product_group", "propensity", "fit_score", "smart_growth_score", "priority_level",
+        "reason_1", "reason_2", "reason_3", "expected_conversion", "recommended_action",
+        "recommended_channel", "recommended_timing", "status", "branch_id"],
+    "rm_feedback_ai": ["feedback_id", "customer_id", "product_code", "product_group",
+                       "segment", "rm_verdict", "agree_flag", "converted_flag"],
+}
+LAZY = {  # name -> columns (None = tất cả)
+    "ai_score_reason": None,
+    "ai_recommendation": None,
+    "fact_campaign": ["channel", "sent_flag", "delivered_flag", "opened_flag", "clicked_flag",
+                      "responded_flag", "interested_flag", "applied_flag", "converted_flag"],
+    "ml_propensity_training_set": ["customer_id", "product_id", "y_holds_product", "y_adopt_next_90d"],
+}
+ANGLE = {"CARD": "Hoàn tiền + ưu đãi chi tiêu, phù hợp mức chi tiêu và thu nhập.",
+         "CASA": "Tài khoản/dịch vụ tối ưu dòng tiền và giao dịch hằng ngày.",
+         "FD": "Cộng thêm lãi suất, tối ưu dòng tiền nhàn rỗi.",
+         "LENDING": "Lãi suất ưu đãi, duyệt nhanh, phù hợp nhu cầu vốn."}
 
 
 @st.cache_data(show_spinner="Đang tải dữ liệu…")
-def load(needed):
-    d, missing = {}, []
-    for name in needed:
+def load(_spec_key):
+    d = {}
+    for name, cols in EAGER.items():
         p = PARQUET / f"{name}.parquet"
         if p.exists():
-            d[name] = pd.read_parquet(p)
-        else:
-            missing.append(name)
-    d["__missing__"] = missing
+            d[name] = _shrink(pd.read_parquet(p, columns=cols))
+    if "ai_product_recommendation_v2" in d:
+        r = d["ai_product_recommendation_v2"]
+        r["message_angle"] = r["product_group"].astype(str).map(ANGLE).astype("category")
     d["__available__"] = sorted(p.stem for p in PARQUET.glob("*.parquet"))
     return d
+
+
+@st.cache_data(show_spinner=False)
+def get_df(name):
+    p = PARQUET / f"{name}.parquet"
+    if not p.exists():
+        return None
+    return _shrink(pd.read_parquet(p, columns=LAZY.get(name)))
 
 
 @st.cache_data
@@ -123,14 +162,13 @@ def load_model_report():
 
 
 try:
-    D = load(tuple(NEEDED))          # tuple(NEEDED) trong cache-key → đổi NEEDED là bust cache
+    D = load(tuple(sorted(EAGER)))
 except Exception as e:  # pragma: no cover
     st.error(f"Không đọc được data/parquet/. Chạy `py src/generate_data.py` + "
              f"`py src/train_models.py --apply` trước.\n\n{e}")
     st.stop()
 
-_core = ("customer_360_feature_mart", "ai_customer_score", "ai_recommendation",
-         "ai_score_reason", "dim_customer", "dim_product")
+_core = ("customer_360_feature_mart", "ai_customer_score", "dim_customer", "dim_product")
 _missing = [t for t in _core if t not in D]
 if _missing:
     st.error("Thiếu file dữ liệu lõi: " + ", ".join(f"`{m}.parquet`" for m in _missing)
@@ -140,16 +178,12 @@ if _missing:
 
 MART = D["customer_360_feature_mart"]
 SCORE = D["ai_customer_score"]
-RECO = D["ai_recommendation"]
-REASON = D["ai_score_reason"]
 CUST = D["dim_customer"]
 PROD = D["dim_product"]
 FB = D.get("rm_action_feedback")
-CAMP = D.get("fact_campaign")
 COEF = D.get("ai_model_coefficient")
 METRIC = D.get("ai_model_metric")
 REGISTRY = D.get("ai_model_registry")
-PROP_TRAIN = D.get("ml_propensity_training_set")
 CAT = D.get("dim_product_catalogue")
 PRECO = D.get("ai_product_recommendation_v2")
 PDEM = D.get("agg_product_demand")
@@ -166,8 +200,9 @@ N_CUST = MART.customer_id.nunique()
 
 
 # --------------------------------------------------------------------------
+@st.cache_data(show_spinner=False)
 def eligibility_frame():
-    """Tái hiện view v_customer_product_eligibility bằng pandas."""
+    """Tái hiện view v_customer_product_eligibility bằng pandas (nạp lười, cache)."""
     m = MART.merge(
         CUST[["customer_id", "customer_active_flag", "kyc_status",
               "marketing_consent_flag", "do_not_contact_flag"]], on="customer_id", how="left")
@@ -197,27 +232,6 @@ def eligibility_frame():
             "rule_no_serious_complaint_15d": r_cmp, "rule_no_recent_rejection_30d": r_rej,
             "rule_contact_frequency_ok": r_freq}))
     return pd.concat(out, ignore_index=True)
-
-
-@st.cache_data
-def top_opportunities():
-    elig = eligibility_frame()
-    s = SCORE.merge(elig[["customer_id", "product_id", "is_eligible", "branch_id"]],
-                    on=["customer_id", "product_id"], how="inner")
-    s = s[s["is_eligible"] & (s["smart_growth_score"] >= 60)].copy()
-    s["product_group"] = s["product_id"].map(PID_GROUP)
-    r1 = RECO[RECO.priority_rank == 1][["score_id", "recommended_action", "recommended_channel",
-                                        "recommended_timing", "message_angle", "status",
-                                        "expected_conversion"]]
-    s = s.merge(r1, on="score_id", how="left")
-    s = s.merge(CUST[["customer_id", "customer_segment", "age_group", "income_band"]], on="customer_id")
-    s["branch_product_rank"] = s.groupby(["branch_id", "product_group"])["smart_growth_score"] \
-        .rank(method="first", ascending=False).astype(int)
-    return s.sort_values("smart_growth_score", ascending=False)
-
-
-ELIG = eligibility_frame()
-TOP = top_opportunities()
 
 
 def fmt_vnd(x):
@@ -343,7 +357,7 @@ digraph {
     m1.metric("Khách hàng", f"{N_CUST:,}")
     m2.metric("Dòng feature mart", f"{len(MART):,}")
     m3.metric("Điểm AI (KH × sản phẩm)", f"{len(SCORE):,}")
-    m4.metric("Khuyến nghị", f"{len(RECO):,}")
+    m4.metric("Khuyến nghị (35 SP)", f"{len(PRECO):,}" if PRECO is not None else "—")
 
 
 # ==========================================================================
@@ -402,13 +416,14 @@ elif PAGE.startswith("🧭"):
                    "+ 15%·Engagement + 10%·Timing + 10%·Relationship")
 
     elif step == "3":
-        g = ELIG.groupby("gate1_result").size().reindex(["ELIGIBLE", "SUPPRESS", "EXCLUDE"]).fillna(0)
+        _elig = eligibility_frame()
+        g = _elig.groupby("gate1_result").size().reindex(["ELIGIBLE", "SUPPRESS", "EXCLUDE"]).fillna(0)
         fig = go.Figure(go.Funnel(y=g.index, x=g.values,
                                   marker_color=["#2E8B8B", "#F4A300", "#5B6770"]))
         fig.update_layout(title="Decision Gate 1 — (khách × sản phẩm mục tiêu)", height=340)
         st.plotly_chart(fig, width="stretch")
-        rules = [c for c in ELIG.columns if c.startswith("rule_")]
-        fail = ((~ELIG[rules]).mean().sort_values(ascending=False) * 100).reset_index()
+        rules = [c for c in _elig.columns if c.startswith("rule_")]
+        fail = ((~_elig[rules]).mean().sort_values(ascending=False) * 100).reset_index()
         fail.columns = ["điều kiện", "pct"]
         fail["điều kiện"] = fail["điều kiện"].str.replace("rule_", "").str.replace("_", " ")
         fig = px.bar(fail, x="pct", y="điều kiện", orientation="h",
@@ -417,7 +432,7 @@ elif PAGE.startswith("🧭"):
         st.plotly_chart(fig, width="stretch")
 
     elif step == "4":
-        R = PRECO if PRECO is not None else RECO
+        R = PRECO
         cid = st.selectbox("Khách hàng", R.customer_id.drop_duplicates().head(500))
         r = R[R.customer_id == cid].sort_values("priority_rank")
         for _, x in r.iterrows():
@@ -431,7 +446,7 @@ elif PAGE.startswith("🧭"):
             st.caption("Xếp hạng trên toàn bộ **35 sản phẩm MSB** (đã loại sản phẩm khách đã sở hữu).")
 
     elif step == "5":
-        R = PRECO if PRECO is not None else RECO
+        R = PRECO
         t = R[R.priority_rank == 1].merge(CUST[["customer_id", "customer_segment"]], on="customer_id")
         piv = t.groupby(["customer_segment", "recommended_action"]).size().reset_index(name="n")
         fig = px.bar(piv, x="customer_segment", y="n", color="recommended_action",
@@ -440,7 +455,7 @@ elif PAGE.startswith("🧭"):
         st.plotly_chart(fig, width="stretch")
 
     elif step == "6":
-        R = PRECO if PRECO is not None else RECO
+        R = PRECO
         t = R[R.priority_rank == 1]
         t = t[t.status != "BLOCKED"] if "status" in t.columns else t
         piv = t.groupby(["recommended_channel", "recommended_timing"]).agg(
@@ -452,7 +467,7 @@ elif PAGE.startswith("🧭"):
         st.plotly_chart(fig, width="stretch")
 
     elif step == "7":
-        R = PRECO if PRECO is not None else RECO
+        R = PRECO
         st.write("Message angle được GenAI sinh từ structured context + template kiểm soát:")
         if PRECO is not None:
             st.dataframe(R[["customer_id", "product_name", "recommended_channel", "message_angle"]]
@@ -463,7 +478,7 @@ elif PAGE.startswith("🧭"):
                          width="stretch", hide_index=True)
 
     elif step in ("8", "9"):
-        R = PRECO if PRECO is not None else RECO
+        R = PRECO
         t = R[R.priority_rank == 1].copy()
         t["blocked"] = t.status.eq("BLOCKED") if "status" in t.columns else t.get("suppression_flag", False)
         piv = t.groupby(["status", "blocked"]).size().reset_index(name="n")
@@ -475,9 +490,10 @@ elif PAGE.startswith("🧭"):
                    "RM_APPROVAL = khách high-value cần tư vấn. SENT/NEW = auto-send / nurture.")
 
     elif step in ("10", "11"):
-        if CAMP is not None:
-            f = CAMP[["sent_flag", "delivered_flag", "opened_flag", "clicked_flag",
-                      "responded_flag", "interested_flag", "applied_flag", "converted_flag"]].mean() * 100
+        _camp = get_df("fact_campaign")
+        if _camp is not None:
+            f = _camp[["sent_flag", "delivered_flag", "opened_flag", "clicked_flag",
+                       "responded_flag", "interested_flag", "applied_flag", "converted_flag"]].mean() * 100
             f.index = ["Sent", "Delivered", "Opened", "Clicked", "Responded",
                        "Interested", "Applied", "Converted"]
             fig = go.Figure(go.Funnel(y=f.index, x=f.values, marker_color=MSB_RED))
@@ -485,8 +501,9 @@ elif PAGE.startswith("🧭"):
             st.plotly_chart(fig, width="stretch")
 
     elif step == "12":
-        if FB is not None:
-            m = FB.merge(RECO[["recommendation_id", "expected_conversion"]], on="recommendation_id")
+        _rv1 = get_df("ai_recommendation")
+        if FB is not None and _rv1 is not None:
+            m = FB.merge(_rv1[["recommendation_id", "expected_conversion"]], on="recommendation_id")
             piv = m.groupby("customer_response").agg(
                 n=("feedback_id", "count"),
                 ai_expected=("expected_conversion", "mean")).reset_index().sort_values("ai_expected")
@@ -568,7 +585,7 @@ elif PAGE.startswith("🎯"):
 # ==========================================================================
 elif PAGE.startswith("👤"):
     st.title("Customer 360")
-    _src = PRECO if PRECO is not None else TOP
+    _src = PRECO
     default_list = _src.customer_id.drop_duplicates().head(300).tolist()
     cid = st.selectbox("Chọn khách hàng", default_list
                        + [c for c in MART.customer_id.head(300) if c not in default_list])
@@ -577,9 +594,11 @@ elif PAGE.startswith("👤"):
     prof = CUST[CUST.customer_id == cid].iloc[0]
     sc = SCORE[SCORE.customer_id == cid].copy()
     sc["product"] = sc.product_id.map(PID_NAME)
-    rc = RECO[RECO.customer_id == cid].sort_values("priority_rank")
     prc = (PRECO[PRECO.customer_id == cid].sort_values("priority_rank")
            if PRECO is not None else pd.DataFrame())
+    _rv1 = get_df("ai_recommendation")
+    rc = (_rv1[_rv1.customer_id == cid].sort_values("priority_rank")
+          if _rv1 is not None else pd.DataFrame())
 
     a, b, c, d = st.columns(4)
     a.metric("Phân khúc", prof.customer_segment)
@@ -632,7 +651,8 @@ elif PAGE.startswith("👤"):
 
         st.subheader("Why this customer  (đóng góp logit theo feature)")
         best_sid = sc.sort_values("smart_growth_score").iloc[-1]["score_id"]
-        rs = REASON[REASON.score_id == best_sid].sort_values("contribution_score")
+        _reason = get_df("ai_score_reason")
+        rs = _reason[_reason.score_id == best_sid].sort_values("contribution_score").copy()
         rs["feat"] = rs.feature_name.map(FEATURE_LABEL).fillna(rs.feature_name)
         fig = px.bar(rs, x="contribution_score", y="feat", orientation="h",
                      color="impact_direction",
@@ -657,7 +677,7 @@ elif PAGE.startswith("📊"):
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Danh mục khách hàng", f"{N_CUST:,}")
     k2.metric("High opportunities (SGS ≥ 80)", f"{(best.smart_growth_score >= 80).sum():,}")
-    k3.metric("Đủ điều kiện tiếp cận", f"{ELIG.is_eligible.sum():,}")
+    k3.metric("Đủ điều kiện tiếp cận", f"{int(eligibility_frame().is_eligible.sum()):,}")
     if FB is not None:
         k4.metric("Tỉ lệ chuyển đổi (RM feedback)", f"{FB.converted_flag.mean()*100:.0f}%")
 
@@ -716,7 +736,7 @@ elif PAGE.startswith("📊"):
             st.plotly_chart(fig, width="stretch")
 
     st.subheader("Xếp hạng chi nhánh theo số cơ hội High")
-    src = PRECO if PRECO is not None else TOP
+    src = PRECO
     hi = src[src.priority_level.isin(["Very High", "High"])]
     if "branch_id" not in hi.columns:
         hi = hi.merge(CUST[["customer_id", "branch_id"]], on="customer_id", how="left")
@@ -791,10 +811,11 @@ elif PAGE.startswith("🤖"):
         st.plotly_chart(fig, width="stretch")
         st.caption("Hệ số quy đổi về thang gốc X∈[0,1]; odds ratio = eʷ.")
 
-    if PROP_TRAIN is not None:
+    _pt = get_df("ml_propensity_training_set")
+    if _pt is not None:
         st.subheader("Calibration — P dự đoán vs adoption thực tế (tệp chưa sở hữu)")
-        s = SCORE.merge(PROP_TRAIN[["customer_id", "product_id", "y_holds_product",
-                                    "y_adopt_next_90d"]], on=["customer_id", "product_id"])
+        s = SCORE.merge(_pt[["customer_id", "product_id", "y_holds_product",
+                             "y_adopt_next_90d"]], on=["customer_id", "product_id"])
         s = s[s.y_holds_product == 0].copy()
         s["decile"] = (s.propensity_probability * 10).clip(0, 9.999).astype(int) + 1
         cal = s.groupby(["product_id", "decile"]).agg(
