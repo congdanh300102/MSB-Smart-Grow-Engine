@@ -9,6 +9,7 @@ Dữ liệu đọc từ  data/parquet/  (sinh bằng src/generate_data.py + src/
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,10 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent.parent
 PARQUET = ROOT / "data" / "parquet"
 MODELS = ROOT / "models"
+
+# Streamlit Community Cloud ~1GB RAM: giới hạn số khách hàng nạp vào app (lấy mẫu
+# xác định). Bộ dữ liệu đầy đủ 25k vẫn nằm trong data/parquet cho DB / phân tích.
+APP_MAX_CUST = int(os.environ.get("APP_MAX_CUST", "12000"))
 
 MSB_RED = "#E4002B"
 MSB_INK = "#1d2733"
@@ -133,17 +138,38 @@ ANGLE = {"CARD": "Hoàn tiền + ưu đãi chi tiêu, phù hợp mức chi tiêu
          "LENDING": "Lãi suất ưu đãi, duyệt nhanh, phù hợp nhu cầu vốn."}
 
 
+@st.cache_data
+def keep_ids():
+    """Tập customer_id được nạp vào app (lấy mẫu đều nếu vượt APP_MAX_CUST)."""
+    p = PARQUET / "dim_customer.parquet"
+    if not p.exists():
+        return None
+    ids = sorted(pd.read_parquet(p, columns=["customer_id"])["customer_id"].tolist())
+    if len(ids) <= APP_MAX_CUST:
+        return None
+    step = max(1, len(ids) // APP_MAX_CUST)
+    return frozenset(ids[::step][:APP_MAX_CUST])
+
+
+def _filt(df, keep):
+    if keep is not None and df is not None and "customer_id" in df.columns:
+        return df[df["customer_id"].isin(keep)].reset_index(drop=True)
+    return df
+
+
 @st.cache_data(show_spinner="Đang tải dữ liệu…")
 def load(_spec_key):
+    keep = keep_ids()
     d = {}
     for name, cols in EAGER.items():
         p = PARQUET / f"{name}.parquet"
         if p.exists():
-            d[name] = _shrink(pd.read_parquet(p, columns=cols))
+            d[name] = _shrink(_filt(pd.read_parquet(p, columns=cols), keep))
     if "ai_product_recommendation_v2" in d:
         r = d["ai_product_recommendation_v2"]
         r["message_angle"] = r["product_group"].astype(str).map(ANGLE).astype("category")
     d["__available__"] = sorted(p.stem for p in PARQUET.glob("*.parquet"))
+    d["__n_cust__"] = 0 if keep is None else len(keep)
     return d
 
 
@@ -152,7 +178,7 @@ def get_df(name):
     p = PARQUET / f"{name}.parquet"
     if not p.exists():
         return None
-    return _shrink(pd.read_parquet(p, columns=LAZY.get(name)))
+    return _shrink(_filt(pd.read_parquet(p, columns=LAZY.get(name)), keep_ids()))
 
 
 @st.cache_data
@@ -263,7 +289,10 @@ PAGE = st.sidebar.radio("Điều hướng", [
     "🤖 Mô hình Propensity",
 ])
 st.sidebar.divider()
-st.sidebar.metric("Khách hàng trong danh mục", f"{N_CUST:,}")
+st.sidebar.metric("Khách hàng trong app", f"{N_CUST:,}")
+if D.get("__n_cust__"):
+    st.sidebar.caption(f"(lấy mẫu đều từ 25.000 KH để vừa RAM Streamlit Cloud; "
+                       f"dữ liệu đầy đủ trong `data/parquet/`)")
 st.sidebar.metric("Cơ hội High (SGS ≥ 80)",
                   f"{(SCORE.groupby('customer_id').smart_growth_score.max() >= 80).sum():,}")
 st.sidebar.caption(f"Model: `{REGISTRY.model_id.iloc[0]}` · `{REGISTRY.model_version.iloc[0]}`"

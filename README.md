@@ -124,9 +124,11 @@ docker-compose.yml       PostgreSQL 16
 ## App trực quan (Streamlit)
 
 ```bash
-pip install -r requirements.txt        # + streamlit, plotly
+pip install -r requirements.txt        # chỉ deps cho app (streamlit/pandas/pyarrow/plotly)
 streamlit run streamlit_app/app.py     # http://localhost:8501
 ```
+Deploy Streamlit Cloud: app lấy mẫu đều **12.000 KH** (biến env `APP_MAX_CUST`) để vừa RAM free tier;
+dữ liệu đầy đủ 25.000 KH vẫn nằm trong `data/parquet/` cho DB/phân tích.
 
 8 trang: **Giới thiệu** · **12 Actions** · **RM Opportunity Desk** (35 SP, Top-N/chi nhánh) ·
 **Customer 360** · **Sản phẩm & Nhu cầu** · **AI Agent · Feedback & Hiệu chỉnh** ·
@@ -156,7 +158,7 @@ py src/rm_feedback_agent.py              # review lại → agreement tăng, 0 v
 ## Chạy
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt      # pipeline đầy đủ (requirements.txt chỉ là deps app)
 
 # 1. sinh dữ liệu (mặc định 5.000 KH; --customers 20000 cho bộ lớn)
 py src/generate_data.py --customers 20000 --seed 42 --casa-days 45 --digital-days 45
