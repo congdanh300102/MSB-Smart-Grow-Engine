@@ -10,6 +10,7 @@ Dữ liệu đọc từ  data/parquet/  (sinh bằng src/generate_data.py + src/
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+# stlite/Pyodide: pyarrow (streamlit dùng để serialize st.dataframe) không hỗ trợ tốt
+# cột 'category' -> "'str' object cannot be interpreted as an integer". Trên WASM giữ
+# cột chuỗi ở dạng object (RAM trình duyệt dư sức); chỉ nén category khi chạy native.
+IS_WASM = sys.platform == "emscripten" or os.environ.get("FORCE_WASM") == "1"
 
 # --------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
@@ -104,8 +110,11 @@ def _shrink(df: pd.DataFrame) -> pd.DataFrame:
             df[c] = s.astype("float32")
         elif dt == "int64" and s.abs().max() < 2_000_000_000:
             df[c] = s.astype("int32")
-        elif dt in ("object", "str", "string") and s.nunique(dropna=False) < n * 0.6:
-            df[c] = s.astype("category")   # str-dtype mặc định của pandas 3 vẫn tốn RAM
+        elif dt in ("object", "str", "string"):
+            if not IS_WASM and s.nunique(dropna=False) < n * 0.6:
+                df[c] = s.astype("category")   # str-dtype mặc định của pandas 3 vẫn tốn RAM
+            elif dt != "object":
+                df[c] = s.astype(object)      # arrow của stlite ổn định nhất với object
     return df
 
 
@@ -194,7 +203,8 @@ def load(_spec_key):
             d[name] = _shrink(_filt(df, keep))
     if "ai_product_recommendation_v2" in d:
         r = d["ai_product_recommendation_v2"]
-        r["message_angle"] = r["product_group"].astype(str).map(ANGLE).astype("category")
+        ang = r["product_group"].astype(str).map(ANGLE)
+        r["message_angle"] = ang if IS_WASM else ang.astype("category")
     d["__available__"] = sorted({p.name.split(".")[0]
                                  for p in PARQUET.glob("*") if p.suffix in (".parquet", ".gz", ".csv")})
     d["__n_cust__"] = 0 if keep is None else len(keep)
