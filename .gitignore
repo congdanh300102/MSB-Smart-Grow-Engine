@@ -16,3 +16,6 @@ data/csv/ai_product_fit.csv
 
 # Excel lock files
 ~$*
+
+# stlite build artifact (regenerate: py stlite/build.py)
+stlite/site/

@@ -138,13 +138,40 @@ ANGLE = {"CARD": "Hoàn tiền + ưu đãi chi tiêu, phù hợp mức chi tiêu
          "LENDING": "Lãi suất ưu đãi, duyệt nhanh, phù hợp nhu cầu vốn."}
 
 
+def _table_path(name):
+    for ext in (".parquet", ".csv.gz", ".csv"):
+        p = PARQUET / f"{name}{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+def _read_table(name, columns=None):
+    """Đọc 1 bảng — parquet (chạy native) hoặc csv.gz (bản stlite/WASM, không cần pyarrow)."""
+    p = _table_path(name)
+    if p is None:
+        return None
+    if p.name.endswith(".parquet"):
+        return pd.read_parquet(p, columns=columns)
+    df = pd.read_csv(p, compression="gzip" if p.name.endswith(".gz") else "infer")
+    for c in df.columns:                       # khôi phục kiểu từ CSV
+        s = df[c]
+        if s.dtype == object:
+            u = set(s.dropna().unique()[:4])
+            if u and u <= {"True", "False"}:
+                df[c] = s.map({"True": True, "False": False}).astype("boolean").fillna(False).astype(bool)
+            elif c.endswith(("_date", "_timestamp", "_from", "_to")):
+                df[c] = pd.to_datetime(s, errors="coerce")
+    return df[columns] if columns else df
+
+
 @st.cache_data
 def keep_ids():
     """Tập customer_id được nạp vào app (lấy mẫu đều nếu vượt APP_MAX_CUST)."""
-    p = PARQUET / "dim_customer.parquet"
-    if not p.exists():
+    d = _read_table("dim_customer", ["customer_id"])
+    if d is None:
         return None
-    ids = sorted(pd.read_parquet(p, columns=["customer_id"])["customer_id"].tolist())
+    ids = sorted(d["customer_id"].tolist())
     if len(ids) <= APP_MAX_CUST:
         return None
     step = max(1, len(ids) // APP_MAX_CUST)
@@ -162,23 +189,22 @@ def load(_spec_key):
     keep = keep_ids()
     d = {}
     for name, cols in EAGER.items():
-        p = PARQUET / f"{name}.parquet"
-        if p.exists():
-            d[name] = _shrink(_filt(pd.read_parquet(p, columns=cols), keep))
+        df = _read_table(name, cols)
+        if df is not None:
+            d[name] = _shrink(_filt(df, keep))
     if "ai_product_recommendation_v2" in d:
         r = d["ai_product_recommendation_v2"]
         r["message_angle"] = r["product_group"].astype(str).map(ANGLE).astype("category")
-    d["__available__"] = sorted(p.stem for p in PARQUET.glob("*.parquet"))
+    d["__available__"] = sorted({p.name.split(".")[0]
+                                 for p in PARQUET.glob("*") if p.suffix in (".parquet", ".gz", ".csv")})
     d["__n_cust__"] = 0 if keep is None else len(keep)
     return d
 
 
 @st.cache_data(show_spinner=False)
 def get_df(name):
-    p = PARQUET / f"{name}.parquet"
-    if not p.exists():
-        return None
-    return _shrink(_filt(pd.read_parquet(p, columns=LAZY.get(name)), keep_ids()))
+    df = _read_table(name, LAZY.get(name))
+    return None if df is None else _shrink(_filt(df, keep_ids()))
 
 
 @st.cache_data
