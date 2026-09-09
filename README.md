@@ -1,3 +1,16 @@
+---
+title: MSB Smart Growth Engine
+emoji: 📈
+colorFrom: red
+colorTo: gray
+sdk: streamlit
+sdk_version: 1.41.0
+app_file: streamlit_app/app.py
+pinned: false
+license: mit
+short_description: AI Customer Intelligence & Sales Growth — MSB Hackathon demo
+---
+
 # MSB SMART GROWTH ENGINE — Data Model, Synthetic Data & Propensity Models
 
 *AI-Powered Customer Intelligence & Sales Growth Platform — MSB Hackathon*
@@ -127,8 +140,23 @@ docker-compose.yml       PostgreSQL 16
 pip install -r requirements.txt        # chỉ deps cho app (streamlit/pandas/pyarrow/plotly)
 streamlit run streamlit_app/app.py     # http://localhost:8501
 ```
-Deploy Streamlit Cloud: app lấy mẫu đều **12.000 KH** (biến env `APP_MAX_CUST`) để vừa RAM free tier;
-dữ liệu đầy đủ 25.000 KH vẫn nằm trong `data/parquet/` cho DB/phân tích.
+
+### Deploy — Hugging Face Spaces (khuyến nghị, free 16GB RAM → full 25.000 KH)
+
+Repo đã có sẵn YAML header cho HF Spaces trong `README.md` (`sdk: streamlit`, `app_file: streamlit_app/app.py`).
+
+```bash
+# 1. Tạo Space: huggingface.co/new-space  → SDK = Streamlit  → (để trống, sẽ push code)
+# 2. Thêm remote HF và push
+git remote add hf https://huggingface.co/spaces/<username>/msb-smart-growth-engine
+git push hf main          # LFS ~475MB upload 1 lần (5–10'); hoặc strip trước (xem HUGGINGFACE.md)
+```
+Space tự build (~3'), chạy full 25.000 KH. Không cần chỉnh gì thêm.
+
+### Deploy — Streamlit Community Cloud (~1GB RAM)
+
+Đặt biến môi trường `APP_MAX_CUST=10000` (Space Settings → Secrets) để app lấy mẫu đều,
+tránh "over resource limits". Dữ liệu đầy đủ 25.000 KH vẫn nằm trong `data/parquet/`.
 
 8 trang: **Giới thiệu** · **12 Actions** · **RM Opportunity Desk** (35 SP, Top-N/chi nhánh) ·
 **Customer 360** · **Sản phẩm & Nhu cầu** · **AI Agent · Feedback & Hiệu chỉnh** ·

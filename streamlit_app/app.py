@@ -23,9 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 PARQUET = ROOT / "data" / "parquet"
 MODELS = ROOT / "models"
 
-# Streamlit Community Cloud ~1GB RAM: giới hạn số khách hàng nạp vào app (lấy mẫu
-# xác định). Bộ dữ liệu đầy đủ 25k vẫn nằm trong data/parquet cho DB / phân tích.
-APP_MAX_CUST = int(os.environ.get("APP_MAX_CUST", "12000"))
+# Số khách hàng tối đa nạp vào app. Mặc định 25000 = full (hợp Hugging Face Spaces,
+# local, VPS). Trên Streamlit Community Cloud (~1GB RAM) đặt env APP_MAX_CUST=10000.
+APP_MAX_CUST = int(os.environ.get("APP_MAX_CUST", "25000"))
 
 MSB_RED = "#E4002B"
 MSB_INK = "#1d2733"
