@@ -128,10 +128,30 @@ pip install -r requirements.txt        # + streamlit, plotly
 streamlit run streamlit_app/app.py     # http://localhost:8501
 ```
 
-6 trang: **Giới thiệu & Mục đích** · **Hành trình AI — 12 Actions** (slider từng bước, chart dữ liệu thật) ·
-**RM Opportunity Desk** (Top-N/chi nhánh/sản phẩm) · **Customer 360** (điểm + "Why this customer") ·
-**Manager Intelligence** (KPI danh mục, feedback loop) · **Mô hình Propensity** (hệ số, metric, calibration).
-Chi tiết: [streamlit_app/README.md](streamlit_app/README.md).
+8 trang: **Giới thiệu** · **12 Actions** · **RM Opportunity Desk** (35 SP, Top-N/chi nhánh) ·
+**Customer 360** · **Sản phẩm & Nhu cầu** · **AI Agent · Feedback & Hiệu chỉnh** ·
+**Manager Intelligence** · **Mô hình Propensity**. Chi tiết: [streamlit_app/README.md](streamlit_app/README.md).
+
+## AI Feedback Agent — RM phản hồi → xem xét lại & hiệu chỉnh mô hình (Action 11–12)
+
+`src/rm_feedback_agent.py`:
+- **RM feedback** (`rm_feedback_ai`): mỗi đề xuất được RM chấm `AGREE / NOT_RELEVANT / CANT_AFFORD /
+  ALREADY_HAS / WRONG_TIMING / NO_NEED_NOW` + có chuyển đổi hay không.
+- **Agent review** (`ai_agent_review`): với mỗi vùng (sản phẩm × phân khúc) đủ mẫu → **giải thích**
+  vì sao AI đề xuất (rule "Khách hàng/Nhu cầu phù hợp" + hard-gate), rồi kết luận
+  **`model_is_wrong`** *chỉ khi* đủ mẫu ≥25 · lý do "chọn sai KH" chiếm ≥40% · nhóm được RM tiếp cận
+  **vẫn không chuyển đổi**. Ngược lại (RM thận trọng / sai thời điểm / nhu cầu mềm) → **không sửa**.
+- **Hiệu chỉnh** (`--apply` → `models/rule_overrides.json`, `ai_model_adjustment`): thắt `min_fit` /
+  chặn phân khúc / đặt sàn `min_income` cho sản phẩm sai. `src/products.py` đọc file override ở lần
+  chấm điểm kế tiếp → `py src/product_analysis.py` để có RM Desk cập nhật.
+- Báo cáo: `models/ai_agent_report.md` · App: trang **"AI Agent · Feedback & Hiệu chỉnh"** ·
+  Schema: `sql/06_feedback_agent.sql`.
+
+```bash
+py src/rm_feedback_agent.py --apply      # feedback + review + áp fix cho vùng "sai thật"
+py src/product_analysis.py               # chấm lại điểm với override
+py src/rm_feedback_agent.py              # review lại → agreement tăng, 0 vùng "sai thật"
+```
 
 ## Chạy
 

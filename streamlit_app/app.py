@@ -97,6 +97,8 @@ NEEDED = [
     # trang "Sản phẩm & Nhu cầu" — chỉ các bảng nhỏ (bỏ ai_product_fit ~vài triệu dòng)
     "dim_product_catalogue", "ai_product_recommendation_v2", "agg_product_demand",
     "agg_segment_product_affinity", "fact_customer_product_holding", "agg_product_propensity",
+    # trang "AI Agent · Feedback"
+    "rm_feedback_ai", "ai_agent_review", "ai_model_adjustment",
 ]
 
 
@@ -154,6 +156,9 @@ PDEM = D.get("agg_product_demand")
 PAFF = D.get("agg_segment_product_affinity")
 PHOLD = D.get("fact_customer_product_holding")
 PCOMP = D.get("agg_product_propensity")
+RFB = D.get("rm_feedback_ai")
+AGR = D.get("ai_agent_review")
+ADJ = D.get("ai_model_adjustment")
 
 PID_NAME = dict(zip(PROD.product_id, PROD.product_name))
 PID_GROUP = dict(zip(PROD.product_id, PROD.product_group))
@@ -239,6 +244,7 @@ PAGE = st.sidebar.radio("Điều hướng", [
     "🎯 RM Opportunity Desk",
     "👤 Customer 360",
     "🛍️ Sản phẩm & Nhu cầu",
+    "🔁 AI Agent · Feedback & Hiệu chỉnh",
     "📊 Manager Intelligence",
     "🤖 Mô hình Propensity",
 ])
@@ -254,6 +260,19 @@ st.sidebar.caption(f"Model: `{REGISTRY.model_id.iloc[0]}` · `{REGISTRY.model_ve
 # PAGE 1 — INTRO
 # ==========================================================================
 if PAGE.startswith("🏠"):
+    st.markdown("""
+<style>
+ .block-container { max-width: 1200px; padding-top: 2rem; }
+ .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5,
+ .stMain [data-testid="stMetricValue"] { font-family: inherit; }
+ .stMain h1 { font-size: 1.8rem; }
+ .stMain h2 { font-size: 1.3rem; }
+ .stMain h3 { font-size: 1.15rem; }
+ .stMain h4, .stMain h5 { font-size: 1rem; }
+ .stMain [data-testid="stMetricValue"] { font-size: 1.5rem; }
+ .msb-step { margin: 6px 0; }
+</style>
+""", unsafe_allow_html=True)
     st.title("MSB Smart Growth Engine")
     st.markdown("#### AI-Powered Customer Intelligence & Sales Growth Platform")
     st.markdown("<span class='msb-badge'>DEMO DATA · Synthetic / Masked</span>",
@@ -313,9 +332,9 @@ digraph {
 
     st.divider()
     st.subheader("Sản phẩm giai đoạn đầu & mô hình dữ liệu")
-    cc = st.columns(4)
-    for col, (grp, pid) in zip(cc, TARGET_PRODUCTS.items()):
-        col.metric(GROUP_LABEL[grp], PID_NAME[pid])
+    for grp, pid in TARGET_PRODUCTS.items():
+        with st.expander(GROUP_LABEL[grp]):
+            st.markdown(f"- {PID_NAME[pid]}")
     st.caption("Data model: 27 bảng PostgreSQL (dim / fact / aggregate / feature mart / "
                "AI feature / model output / recommendation / feedback / training) + 2 view "
                "(eligibility gate, top-20). Chi tiết: `sql/01_schema.sql`, `README.md`.")
@@ -859,10 +878,13 @@ elif PAGE.startswith("🛍️"):
     with tab3:
         aff = PAFF.set_index(PAFF.columns[0]) if PAFF.columns[0] != "product_code" else PAFF.set_index("product_code")
         aff = aff.select_dtypes("number")
-        fig = px.imshow(aff, aspect="auto", color_continuous_scale="Reds",
+        fig = px.imshow(aff, aspect="auto",
+                        color_continuous_scale=["#eff6ff", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
                         labels=dict(color="propensity TB"))
         fig.update_layout(title="Ma trận phân khúc × sản phẩm (propensity trung bình)",
-                          height=760)
+                          height=620,
+                          margin=dict(l=60, r=30, t=70, b=60),
+                          coloraxis_colorbar=dict(thickness=14, len=0.8, tickformat=".0%"))
         st.plotly_chart(fig, width="stretch")
 
     # ---- Gợi ý theo khách hàng ------------------------------------
@@ -891,3 +913,115 @@ elif PAGE.startswith("🛍️"):
         st.dataframe(r[["priority_rank", "product_code", "product_group", "propensity",
                         "fit_score", "smart_growth_score", "expected_conversion"]],
                      width="stretch", hide_index=True)
+
+
+# ==========================================================================
+# PAGE 5c — AI AGENT · FEEDBACK & HIỆU CHỈNH  (Action 11–12)
+# ==========================================================================
+elif PAGE.startswith("🔁"):
+    st.title("AI Agent — RM Feedback & Hiệu chỉnh mô hình")
+    st.caption("Action 11–12 của hành trình AI: RM phản hồi với đề xuất → agent **xem xét lại "
+               "mô hình**, **giải thích**, phân biệt \"AI sai thật\" vs \"RM thận trọng\", rồi "
+               "**hiệu chỉnh rule/gate** khi sai thật → chấm lại điểm.")
+
+    if RFB is None or AGR is None:
+        st.warning("Chưa có dữ liệu agent. Chạy `py src/rm_feedback_agent.py --apply` "
+                   "rồi `py src/product_analysis.py`.\n\n"
+                   "Có trong data/parquet/: " + ", ".join(D.get("__available__", [])))
+        st.stop()
+
+    wrong = AGR[AGR.model_is_wrong]
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Lượt RM phản hồi", f"{len(RFB):,}")
+    k2.metric("Đồng thuận RM ↔ AI", f"{RFB.agree_flag.mean()*100:.0f}%")
+    k3.metric("Vùng nghi vấn", f"{len(AGR)}")
+    k4.metric("Kết luận MÔ HÌNH SAI", f"{len(wrong)}")
+    k5.metric("Đề xuất bị loại sau fix",
+              f"{int(ADJ.impact_recos.sum()):,}" if ADJ is not None and len(ADJ) else "0")
+
+    t1, t2, t3, t4 = st.tabs(["📊 Đồng thuận", "🔎 Phát hiện & giải thích",
+                              "🔧 Hiệu chỉnh đã áp", "✍️ RM gửi feedback"])
+
+    with t1:
+        g = (RFB.groupby("product_group").agg(n=("feedback_id", "count"),
+             agree=("agree_flag", "mean"), conv=("converted_flag", "mean")).reset_index())
+        c1, c2 = st.columns(2)
+        with c1:
+            fig = px.bar(g, x="product_group", y="agree", color="product_group",
+                         color_discrete_sequence=PALETTE, text=g.agree.map(lambda v: f"{v:.0%}"))
+            fig.update_layout(title="% RM đồng ý với đề xuất AI, theo nhóm", showlegend=False,
+                              height=360, yaxis_tickformat=".0%", xaxis_title="")
+            st.plotly_chart(fig, width="stretch")
+        with c2:
+            v = RFB.rm_verdict.value_counts().rename_axis("verdict").reset_index(name="n")
+            fig = px.bar(v, x="n", y="verdict", orientation="h", color_discrete_sequence=[MSB_INK])
+            fig.update_layout(title="Phân bố phản hồi RM", height=360, yaxis_title="")
+            st.plotly_chart(fig, width="stretch")
+        heat = (RFB.groupby(["product_code", "segment"]).agree_flag.mean().reset_index()
+                .pivot(index="product_code", columns="segment", values="agree_flag"))
+        fig = px.imshow(heat, color_continuous_scale="RdYlGn", zmin=0.2, zmax=0.9, aspect="auto",
+                        labels=dict(color="% đồng ý"))
+        fig.update_layout(title="Heatmap đồng thuận: sản phẩm × phân khúc (đỏ = AI sai nhiều)",
+                          height=760)
+        st.plotly_chart(fig, width="stretch")
+
+    with t2:
+        st.markdown("Agent chỉ kết luận **“mô hình sai thật”** khi: đủ mẫu (≥25 phản hồi) · "
+                    "một lý do từ chối *chọn sai khách* (NOT_RELEVANT / CANT_AFFORD / ALREADY_HAS) "
+                    "chiếm ≥40% · và nhóm được RM tiếp cận **vẫn không chuyển đổi**. "
+                    "Ngược lại → RM thận trọng / sai thời điểm / thiếu tín hiệu → **không sửa**.")
+        for _, r in AGR.iterrows():
+            badge = "🔴 MÔ HÌNH SAI THẬT" if r.model_is_wrong else "⚪ Không sửa mô hình"
+            scope = f" · phân khúc {r.segment}" if r.segment != "(tất cả)" else ""
+            with st.expander(f"{badge} — {r.product_code}{scope}  ·  {r.finding_type}"):
+                m = st.columns(4)
+                m[0].metric("Phản hồi", int(r.n_feedback))
+                m[1].metric("% đồng ý", f"{r.agree_rate:.0%}")
+                m[2].metric(f"Lý do chính · {r.dominant_verdict}", f"{r.dominant_share:.0%}")
+                m[3].metric("Chuyển đổi (đã tiếp cận)", f"{r.conversion_rate_acted:.0%}")
+                st.markdown(r.explanation)
+                st.code(r.proposed_fix, language="json")
+
+    with t3:
+        if ADJ is None or not len(ADJ):
+            st.info("Chưa áp hiệu chỉnh nào. Chạy `py src/rm_feedback_agent.py --apply`.")
+        else:
+            st.dataframe(ADJ[["product_code", "finding_type", "kind", "before", "after",
+                              "impact_recos"]], width="stretch", hide_index=True)
+            st.caption("Ghi vào `models/rule_overrides.json` — `src/products.py` đọc file này ở "
+                       "lần chấm điểm kế tiếp (thắt ngưỡng fit / chặn phân khúc / đặt sàn thu nhập).")
+            ovr = MODELS / "rule_overrides.json"
+            if ovr.exists():
+                with st.expander("models/rule_overrides.json"):
+                    st.code(ovr.read_text(encoding="utf-8"), language="json")
+        rep = MODELS / "ai_agent_report.md"
+        if rep.exists():
+            with st.expander("models/ai_agent_report.md"):
+                st.markdown(rep.read_text(encoding="utf-8"))
+
+    with t4:
+        st.caption("Demo: chọn 1 đề xuất #1 của khách và gửi phản hồi. Lưu tạm trong phiên "
+                   "(không ghi vào file) — pipeline thật: append vào `rm_feedback_ai`.")
+        if "rm_fb_demo" not in st.session_state:
+            st.session_state.rm_fb_demo = []
+        cid = st.selectbox("Khách hàng", PRECO.customer_id.drop_duplicates().head(400))
+        top = PRECO[(PRECO.customer_id == cid) & (PRECO.priority_rank == 1)]
+        if not top.empty:
+            x = top.iloc[0]
+            st.markdown(f"**AI đề xuất #1:** {x['product_name']} · propensity {x.propensity:.0%} · "
+                        f"SGS {x.smart_growth_score:.0f}  \n*{x.message_angle}*")
+            with st.form("rm_fb"):
+                verdict = st.radio("Phản hồi của RM", [
+                    "AGREE — hợp lý, sẽ tiếp cận",
+                    "NOT_RELEVANT — KH không phù hợp sản phẩm này",
+                    "CANT_AFFORD — chưa đủ khả năng tài chính",
+                    "ALREADY_HAS — KH đã có sản phẩm tương đương",
+                    "WRONG_TIMING — đúng SP, sai thời điểm",
+                    "NO_NEED_NOW — KH chưa quan tâm"], horizontal=False)
+                note = st.text_input("Ghi chú")
+                if st.form_submit_button("Gửi phản hồi"):
+                    st.session_state.rm_fb_demo.insert(0, {
+                        "customer_id": cid, "product": x["product_name"],
+                        "verdict": verdict.split(" — ")[0], "note": note})
+        if st.session_state.rm_fb_demo:
+            st.dataframe(pd.DataFrame(st.session_state.rm_fb_demo), width="stretch", hide_index=True)

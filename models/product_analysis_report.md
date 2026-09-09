@@ -15,18 +15,18 @@
 
 | Sản phẩm | Số KH đứng #1 | % KH |
 |---|--:|--:|
-| CARD_DEBIT_DOMESTIC | 6,203 | 24.8% |
-| CASA_PAYROLL | 4,656 | 18.6% |
-| CARD_DEBIT_INTL_VISA | 3,777 | 15.1% |
-| CASA_BIZ_MSMART | 1,937 | 7.7% |
+| CARD_DEBIT_DOMESTIC | 6,347 | 25.4% |
+| CASA_PAYROLL | 4,672 | 18.7% |
+| CARD_DEBIT_INTL_VISA | 3,808 | 15.2% |
+| CASA_BIZ_MSMART | 1,943 | 7.8% |
+| FD_TD_STANDARD | 1,394 | 5.6% |
 | CARD_DEBIT_PLATINUM_FCB | 1,321 | 5.3% |
-| FD_TD_STANDARD | 1,138 | 4.6% |
 | CASA_ESCROW | 864 | 3.5% |
-| FD_SAV_KIDS | 740 | 3.0% |
-| FD_SAV_UPFRONT | 572 | 2.3% |
-| FD_TD_ONLINE | 537 | 2.1% |
-| CASA_M_FIRST | 515 | 2.1% |
-| LEND_CONSUMER | 391 | 1.6% |
+| FD_TD_ONLINE | 647 | 2.6% |
+| FD_SAV_UPFRONT | 616 | 2.5% |
+| CASA_M_FIRST | 530 | 2.1% |
+| LEND_CONSUMER | 466 | 1.9% |
+| LEND_UNSECURED_PAYROLL | 369 | 1.5% |
 
 ## 3. Dự báo cầu 90 ngày (tệp đủ điều kiện, chưa sở hữu, có tiếp cận)
 
@@ -39,23 +39,23 @@
 | FD_TD_ONLINE | FD | 20,273 | 0.68 | **1,025** |
 | FD_SAV_UPFRONT | FD | 19,552 | 0.65 | **943** |
 | FD_SAV_PARTIAL | FD | 19,114 | 0.66 | **922** |
-| LEND_UNSECURED_PAYROLL | LENDING | 15,274 | 0.68 | **767** |
-| LEND_AUTO_NEW | LENDING | 15,438 | 0.69 | **761** |
 | CARD_DEBIT_INTL_VISA | CARD | 12,679 | 0.80 | **756** |
 | LEND_CONSUMER | LENDING | 13,581 | 0.70 | **703** |
-| FD_SAV_KIDS | FD | 12,697 | 0.72 | **683** |
 | FD_SAV_MAXRATE | FD | 13,329 | 0.66 | **670** |
 | LEND_OVERDRAFT_PERSONAL | LENDING | 15,458 | 0.56 | **641** |
 | CARD_CC_MDIGI | CARD | 11,822 | 0.68 | **602** |
 | FD_CD | FD | 11,645 | 0.67 | **600** |
+| LEND_UNSECURED_PAYROLL | LENDING | 10,830 | 0.69 | **573** |
 | CASA_PAYROLL | CASA | 8,858 | 0.79 | **531** |
 | CARD_CC_ONLINE | CARD | 8,470 | 0.76 | **495** |
 | FD_SAV_PERIODIC | FD | 9,503 | 0.65 | **488** |
 | CARD_CC_FAMILY | CARD | 8,567 | 0.75 | **467** |
 | CASA_M_FIRST | CASA | 7,528 | 0.74 | **418** |
 | CARD_DEBIT_PLATINUM_FCB | CARD | 6,837 | 0.70 | **409** |
+| CARD_CC_SIGNATURE | CARD | 7,172 | 0.70 | **385** |
+| CASA_BIZ_MSMART | CASA | 5,030 | 0.88 | **336** |
 
-**Tổng dự báo mở mới 90 ngày: ~17,077 sản phẩm** (30N: ~6,490, 60N: ~11,953).
+**Tổng dự báo mở mới 90 ngày: ~16,047 sản phẩm** (30N: ~6,098, 60N: ~11,232).
 
 ## 4. Phân khúc phù hợp nhất theo nhóm sản phẩm
 
@@ -69,10 +69,10 @@
 
 ## 5. Khoảng trống danh mục (portfolio gap)
 
-- 24,772 / 25,000 khách (100%) có ít nhất 1 **nhóm sản phẩm** phù hợp (propensity ≥ 0.6) nhưng chưa sở hữu.
-- Trung bình 2.8 nhóm whitespace / khách (tối đa 4: CARD / CASA / FD / LENDING).
-- Cơ hội cross-sell theo nhóm: CARD (21,497 khách), FD (19,058 khách), CASA (15,432 khách), LENDING (12,702 khách).
-- Tổng cơ hội (khách × sản phẩm, propensity ≥ 0.6): 225,150.
+- 24,723 / 25,000 khách (100%) có ít nhất 1 **nhóm sản phẩm** phù hợp (propensity ≥ 0.6) nhưng chưa sở hữu.
+- Trung bình 2.7 nhóm whitespace / khách (tối đa 4: CARD / CASA / FD / LENDING).
+- Cơ hội cross-sell theo nhóm: CARD (21,497 khách), FD (18,366 khách), CASA (15,432 khách), LENDING (12,100 khách).
+- Tổng cơ hội (khách × sản phẩm, propensity ≥ 0.6): 214,063.
 
 ## 6. Cách dùng
 

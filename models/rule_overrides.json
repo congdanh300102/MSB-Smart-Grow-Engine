@@ -1,0 +1,31 @@
+{
+  "FD_SAV_KIDS": {
+    "min_fit": 0.6,
+    "note": "RM feedback NOT_RELEVANT tập trung ở phân khúc MASS_AFFLUENT",
+    "applied_by": "ai_feedback_agent",
+    "applied_date": "2026-08-31",
+    "review_id": "AGR00074",
+    "block_segments": [
+      "MASS",
+      "MASS_AFFLUENT"
+    ]
+  },
+  "LEND_AUTO_NEW": {
+    "min_fit": 0.6,
+    "note": "RM feedback NOT_RELEVANT tập trung ở phân khúc MASS",
+    "applied_by": "ai_feedback_agent",
+    "applied_date": "2026-08-31",
+    "review_id": "AGR00111",
+    "block_segments": [
+      "MASS",
+      "MASS_AFFLUENT"
+    ]
+  },
+  "LEND_UNSECURED_PAYROLL": {
+    "min_income": 20000000.0,
+    "note": "RM feedback CANT_AFFORD — gate không kiểm tra dòng tiền ròng & dư nợ",
+    "applied_by": "ai_feedback_agent",
+    "applied_date": "2026-08-31",
+    "review_id": "AGR00141"
+  }
+}

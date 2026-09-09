@@ -21,8 +21,24 @@ gap danh mục + loại sản phẩm đã có khỏi đề xuất).
 """
 from __future__ import annotations
 
+import json
+import os
+
 import numpy as np
 import pandas as pd
+
+# --- Hiệu chỉnh do AI Feedback Agent áp dụng (models/rule_overrides.json) ------
+# schema mỗi product_code: {min_fit, block_segments, min_income, note, applied_date}
+_OVR_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "models", "rule_overrides.json")
+
+
+def load_overrides() -> dict:
+    try:
+        with open(_OVR_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
 
 # ------------------------------------------------------------------ helpers
 INCOME_VND = {"<10M": 7e6, "10-20M": 15e6, "20-40M": 30e6, "40-80M": 60e6, "80M+": 120e6}
@@ -348,8 +364,10 @@ def fit_table(mart: pd.DataFrame) -> pd.DataFrame:
     f = _feat(mart)
     cid = mart["customer_id"].to_numpy()
     n = len(mart)
+    ovr = load_overrides()
     out = []
     for p in CATALOGUE:
+        o = ovr.get(p["product_code"], {})
         # customer_type gate
         if p["customer_type"] == "SME":
             ok_type = f["is_sme"]
@@ -381,7 +399,14 @@ def fit_table(mart: pd.DataFrame) -> pd.DataFrame:
                 g = np.ones(n, dtype=bool)
         else:
             g = np.ones(n, dtype=bool)
-        elig = ok_type.to_numpy() & g & (score >= 0.50)
+        # --- áp hiệu chỉnh của AI Feedback Agent ---------------------------
+        min_fit = float(o.get("min_fit", 0.50))
+        keep = np.ones(n, dtype=bool)
+        if o.get("block_segments"):
+            keep &= ~f["seg"].isin(o["block_segments"]).to_numpy()
+        if o.get("min_income"):
+            keep &= (f["income"].to_numpy() >= float(o["min_income"]))
+        elig = ok_type.to_numpy() & g & keep & (score >= min_fit)
         top = [sorted(r, reverse=True)[:3] for r in reasons]
         out.append(pd.DataFrame({
             "customer_id": cid,

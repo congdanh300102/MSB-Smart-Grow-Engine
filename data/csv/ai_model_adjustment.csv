@@ -1,0 +1,8 @@
+adjustment_id,review_id,run_date,product_code,finding_type,kind,before,after,impact_recos
+ADJ00001,AGR00071,2026-08-31,FD_SAV_KIDS,RULE_TOO_LOOSE,min_fit,"{""min_fit"": null, ""block_segments"": null, ""min_income"": null}","{""min_fit"": 0.6, ""block_segments"": null, ""min_income"": null}",8121
+ADJ00002,AGR00109,2026-08-31,LEND_AUTO_NEW,RULE_TOO_LOOSE,min_fit,"{""min_fit"": null, ""block_segments"": null, ""min_income"": null}","{""min_fit"": 0.6, ""block_segments"": null, ""min_income"": null}",6203
+ADJ00003,AGR00073,2026-08-31,FD_SAV_KIDS,RULE_TOO_LOOSE_SEGMENT,block_segments,"{""min_fit"": 0.6, ""block_segments"": null, ""min_income"": null}","{""min_fit"": 0.6, ""block_segments"": [""MASS""], ""min_income"": null}",2419
+ADJ00004,AGR00074,2026-08-31,FD_SAV_KIDS,RULE_TOO_LOOSE_SEGMENT,block_segments,"{""min_fit"": 0.6, ""block_segments"": [""MASS""], ""min_income"": null}","{""min_fit"": 0.6, ""block_segments"": [""MASS"", ""MASS_AFFLUENT""], ""min_income"": null}",1855
+ADJ00005,AGR00141,2026-08-31,LEND_UNSECURED_PAYROLL,GATE_INCOME_TOO_LOOSE,min_income,"{""min_fit"": null, ""block_segments"": null, ""min_income"": null}","{""min_fit"": null, ""block_segments"": null, ""min_income"": 20000000.0}",1886
+ADJ00006,AGR00112,2026-08-31,LEND_AUTO_NEW,RULE_TOO_LOOSE_SEGMENT,block_segments,"{""min_fit"": 0.6, ""block_segments"": null, ""min_income"": null}","{""min_fit"": 0.6, ""block_segments"": [""MASS_AFFLUENT""], ""min_income"": null}",1277
+ADJ00007,AGR00111,2026-08-31,LEND_AUTO_NEW,RULE_TOO_LOOSE_SEGMENT,block_segments,"{""min_fit"": 0.6, ""block_segments"": [""MASS_AFFLUENT""], ""min_income"": null}","{""min_fit"": 0.6, ""block_segments"": [""MASS"", ""MASS_AFFLUENT""], ""min_income"": null}",1687
