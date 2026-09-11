@@ -95,7 +95,7 @@ colorTo: gray
 sdk: static
 pinned: false
 license: mit
-short_description: AI Customer Intelligence & Sales Growth (Streamlit-in-WASM, full 25k)
+short_description: AI Customer Intelligence & Sales Growth (stlite demo)
 ---
 
 # MSB Smart Growth Engine — bản static (stlite)
