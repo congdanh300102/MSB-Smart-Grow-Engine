@@ -19,31 +19,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-# stlite/Pyodide: pyarrow (streamlit dùng để serialize st.dataframe) không hỗ trợ tốt
-# cột 'category' -> "'str' object cannot be interpreted as an integer". Trên WASM giữ
-# cột chuỗi ở dạng object (RAM trình duyệt dư sức); chỉ nén category khi chạy native.
-# sys.platform không đáng tin cậy trên mọi bản Pyodide/stlite -> kiểm thêm module 'pyodide'
-# (luôn có sẵn trong runtime Pyodide, kể cả khi app không tự import).
+# stlite/Pyodide: giữ cột chuỗi ở dạng object thay vì 'category' trên WASM — RAM trình
+# duyệt dư sức, và tránh mọi rủi ro tương thích Arrow chưa biết trên bản pyarrow của stlite.
+# (sys.platform không đáng tin cậy trên mọi bản Pyodide/stlite -> kiểm thêm 'pyodide' in sys.modules.)
 IS_WASM = (sys.platform == "emscripten" or "pyodide" in sys.modules
            or os.environ.get("FORCE_WASM") == "1")
-
-# Lớp bảo vệ độc lập với IS_WASM (phòng khi detect môi trường sai): chặn tận gốc ở
-# st.dataframe — luôn ép cột 'category' về string trước khi streamlit serialize bằng
-# Arrow, vì đây là nguồn lỗi thật sự ("'str' object cannot be interpreted as an integer").
-_orig_st_dataframe = st.dataframe
-
-
-def _safe_dataframe(data=None, *args, **kwargs):
-    if isinstance(data, pd.DataFrame):
-        cat_cols = data.select_dtypes(include="category").columns
-        if len(cat_cols):
-            data = data.copy()
-            for c in cat_cols:
-                data[c] = data[c].astype(str)
-    return _orig_st_dataframe(data, *args, **kwargs)
-
-
-st.dataframe = _safe_dataframe
 
 # --------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
@@ -477,7 +457,7 @@ elif PAGE.startswith("🧭"):
         if row.salary_flag: sig.append("Có nhận lương qua MSB")
         if row.recent_rejection_flag: sig.append("Vừa từ chối một offer gần đây")
         st.write("**Recent signals:** " + (" · ".join(sig) if sig else "—"))
-        st.dataframe(pd.DataFrame({"feature": row.index.astype(str), "giá trị": row.astype(str).values}), width="stretch", height=460, hide_index=True)
+        st.dataframe(pd.DataFrame({"feature": row.index.astype(str), "giá trị": row.astype(str).values}), use_container_width=True, height=460, hide_index=True)
 
     elif step == "2":
         c1, c2 = st.columns([2, 1])
@@ -557,11 +537,11 @@ elif PAGE.startswith("🧭"):
         st.write("Message angle được GenAI sinh từ structured context + template kiểm soát:")
         if PRECO is not None:
             st.dataframe(R[["customer_id", "product_name", "recommended_channel", "message_angle"]]
-                         .head(25), width="stretch", hide_index=True)
+                         .head(25), use_container_width=True, hide_index=True)
         else:
             st.dataframe(R[["customer_id", "recommended_product_id", "recommended_channel", "message_angle"]]
                          .head(25).assign(recommended_product_id=lambda d: d.recommended_product_id.map(PID_NAME)),
-                         width="stretch", hide_index=True)
+                         use_container_width=True, hide_index=True)
 
     elif step in ("8", "9"):
         R = PRECO
@@ -661,7 +641,7 @@ elif PAGE.startswith("🎯"):
         "customer_segment": "Segment", "priority_level": "Priority",
         "recommended_action": "Next Best Action", "recommended_channel": "Kênh",
         "recommended_timing": "Thời điểm", "status": "Trạng thái"})
-    st.dataframe(disp, width="stretch", hide_index=True, height=560)
+    st.dataframe(disp, use_container_width=True, hide_index=True, height=560)
     st.download_button("Tải danh sách (CSV)", disp.to_csv(index=False).encode("utf-8"),
                        f"top_{pid}_{branch}.csv", "text/csv")
 
@@ -747,7 +727,7 @@ elif PAGE.startswith("👤"):
         st.plotly_chart(fig, width="stretch")
 
     with st.expander("Toàn bộ feature Customer 360"):
-        st.dataframe(pd.DataFrame({"feature": row.index.astype(str), "giá trị": row.astype(str).values}), width="stretch", height=500, hide_index=True)
+        st.dataframe(pd.DataFrame({"feature": row.index.astype(str), "giá trị": row.astype(str).values}), use_container_width=True, height=500, hide_index=True)
 
 
 # ==========================================================================
@@ -874,7 +854,7 @@ elif PAGE.startswith("🤖"):
     piv = key.pivot_table(index=["product", "dataset_split"], columns="metric_name",
                           values="metric_value").reset_index()
     st.subheader("Kết quả test")
-    st.dataframe(piv.round(3), width="stretch", hide_index=True)
+    st.dataframe(piv.round(3), use_container_width=True, hide_index=True)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -948,7 +928,7 @@ elif PAGE.startswith("🛍️"):
             c[c.product_group.isin(gsel)][["product_code", "product_name", "product_group",
                                            "subgroup", "product_tier", "customer_type",
                                            "target_need", "base_propensity"]],
-            width="stretch", hide_index=True, height=520)
+            use_container_width=True, hide_index=True, height=520)
         k1, k2, k3 = st.columns(3)
         k1.metric("Sản phẩm chuẩn hoá", len(c))
         if PHOLD is not None:
@@ -979,7 +959,7 @@ elif PAGE.startswith("🛍️"):
         st.dataframe(dd.sort_values("expected_adopters_90d", ascending=False)[
             ["product_code", "product_group", "segment", "eligible_customers", "current_holders",
              "avg_propensity", "high_propensity", "expected_adopters_90d"]],
-            width="stretch", hide_index=True, height=360)
+            use_container_width=True, hide_index=True, height=360)
 
     # ---- Phân khúc × Sản phẩm --------------------------------------
     with tab3:
@@ -1019,7 +999,7 @@ elif PAGE.startswith("🛍️"):
         st.divider()
         st.dataframe(r[["priority_rank", "product_code", "product_group", "propensity",
                         "fit_score", "smart_growth_score", "expected_conversion"]],
-                     width="stretch", hide_index=True)
+                     use_container_width=True, hide_index=True)
 
 
 # ==========================================================================
@@ -1094,7 +1074,7 @@ elif PAGE.startswith("🔁"):
             st.info("Chưa áp hiệu chỉnh nào. Chạy `py src/rm_feedback_agent.py --apply`.")
         else:
             st.dataframe(ADJ[["product_code", "finding_type", "kind", "before", "after",
-                              "impact_recos"]], width="stretch", hide_index=True)
+                              "impact_recos"]], use_container_width=True, hide_index=True)
             st.caption("Ghi vào `models/rule_overrides.json` — `src/products.py` đọc file này ở "
                        "lần chấm điểm kế tiếp (thắt ngưỡng fit / chặn phân khúc / đặt sàn thu nhập).")
             ovr = MODELS / "rule_overrides.json"
@@ -1131,4 +1111,4 @@ elif PAGE.startswith("🔁"):
                         "customer_id": cid, "product": x["product_name"],
                         "verdict": verdict.split(" — ")[0], "note": note})
         if st.session_state.rm_fb_demo:
-            st.dataframe(pd.DataFrame(st.session_state.rm_fb_demo), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(st.session_state.rm_fb_demo), use_container_width=True, hide_index=True)
