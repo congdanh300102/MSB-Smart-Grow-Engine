@@ -55,16 +55,46 @@ INDEX_HTML = """<!doctype html>
     #boot .bar i {{ display: block; height: 100%; width: 40%; background: #E4002B;
                     animation: mv 1.1s infinite ease-in-out; }}
     @keyframes mv {{ 0% {{ margin-left: -40%; }} 100% {{ margin-left: 100%; }} }}
+    #boot .retry {{ display: none; margin-top: 6px; padding: 6px 16px; border: none;
+                    border-radius: 6px; background: #E4002B; color: #fff; font-size: .85rem;
+                    cursor: pointer; }}
   </style>
 </head>
 <body>
   <div id="boot">
     <div class="t">MSB Smart Growth Engine</div>
-    <div class="bar"><i></i></div>
-    <div class="s">Đang tải Python + dữ liệu (~55MB, chỉ lần đầu, sau đó cache trong trình duyệt).
+    <div class="bar" id="boot-bar"><i></i></div>
+    <div class="s" id="boot-msg">Đang tải Python + dữ liệu (~55MB, chỉ lần đầu, sau đó cache trong trình duyệt).
       Full 25.000 khách hàng — chạy hoàn toàn trên máy bạn, không cần server.</div>
+    <button class="retry" id="boot-retry" onclick="location.reload()">Tải lại trang</button>
   </div>
   <div id="root"></div>
+  <script>
+    // CDN đôi lúc trả lỗi tạm thời khi tải các chunk JS lazy-load của stlite
+    // ("Failed to fetch dynamically imported module") -> tự tải lại trang 1 lần.
+    // Dùng sessionStorage để không lặp vô hạn nếu lỗi lặp lại thật sự.
+    function isChunkError(msg) {{
+      return typeof msg === "string" && (msg.includes("dynamically imported module")
+        || msg.includes("Failed to fetch") || msg.includes("Importing a module script failed"));
+    }}
+    function handleFatal(msg) {{
+      if (!isChunkError(msg)) return;
+      const tries = Number(sessionStorage.getItem("msb_reload_tries") || "0");
+      if (tries < 2) {{
+        sessionStorage.setItem("msb_reload_tries", String(tries + 1));
+        const m = document.getElementById("boot-msg");
+        if (m) m.textContent = "Mạng/CDN gián đoạn, đang tự tải lại (" + (tries + 1) + "/2)…";
+        setTimeout(() => location.reload(), 1200);
+      }} else {{
+        document.getElementById("boot-bar").style.display = "none";
+        document.getElementById("boot-msg").textContent =
+          "Không tải được do mạng/CDN chập chờn. Bấm 'Tải lại trang', hoặc thử mạng khác.";
+        document.getElementById("boot-retry").style.display = "inline-block";
+      }}
+    }}
+    window.addEventListener("error", (e) => handleFatal(e?.message || String(e?.error || "")));
+    window.addEventListener("unhandledrejection", (e) => handleFatal(String(e?.reason?.message || e?.reason || "")));
+  </script>
   <script type="module">
     import {{ mount }} from "https://cdn.jsdelivr.net/npm/@stlite/browser@{ver}/build/stlite.js";
     mount(
@@ -79,6 +109,7 @@ INDEX_HTML = """<!doctype html>
       if (document.querySelector("#root .stApp, #root [data-testid='stAppViewContainer'], #root iframe")) {{
         document.getElementById("boot")?.remove();
         clearInterval(iv);
+        sessionStorage.removeItem("msb_reload_tries");   // tải thành công -> reset bộ đếm
       }}
     }}, 400);
     setTimeout(() => {{ document.getElementById("boot")?.remove(); clearInterval(iv); }}, 120000);
