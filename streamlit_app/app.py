@@ -22,7 +22,28 @@ import streamlit as st
 # stlite/Pyodide: pyarrow (streamlit dùng để serialize st.dataframe) không hỗ trợ tốt
 # cột 'category' -> "'str' object cannot be interpreted as an integer". Trên WASM giữ
 # cột chuỗi ở dạng object (RAM trình duyệt dư sức); chỉ nén category khi chạy native.
-IS_WASM = sys.platform == "emscripten" or os.environ.get("FORCE_WASM") == "1"
+# sys.platform không đáng tin cậy trên mọi bản Pyodide/stlite -> kiểm thêm module 'pyodide'
+# (luôn có sẵn trong runtime Pyodide, kể cả khi app không tự import).
+IS_WASM = (sys.platform == "emscripten" or "pyodide" in sys.modules
+           or os.environ.get("FORCE_WASM") == "1")
+
+# Lớp bảo vệ độc lập với IS_WASM (phòng khi detect môi trường sai): chặn tận gốc ở
+# st.dataframe — luôn ép cột 'category' về string trước khi streamlit serialize bằng
+# Arrow, vì đây là nguồn lỗi thật sự ("'str' object cannot be interpreted as an integer").
+_orig_st_dataframe = st.dataframe
+
+
+def _safe_dataframe(data=None, *args, **kwargs):
+    if isinstance(data, pd.DataFrame):
+        cat_cols = data.select_dtypes(include="category").columns
+        if len(cat_cols):
+            data = data.copy()
+            for c in cat_cols:
+                data[c] = data[c].astype(str)
+    return _orig_st_dataframe(data, *args, **kwargs)
+
+
+st.dataframe = _safe_dataframe
 
 # --------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
