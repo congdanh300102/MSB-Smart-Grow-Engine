@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -307,6 +308,81 @@ def fmt_vnd(x):
     if abs(x) >= 1e6:
         return f"{x/1e6:.1f} tr"
     return f"{x:,.0f}"
+
+
+def _fold(s):
+    """Chuẩn hoá chuỗi để tìm kiếm: bỏ dấu tiếng Việt, không phân biệt hoa thường."""
+    s = unicodedata.normalize("NFD", str(s).replace("đ", "d").replace("Đ", "D"))
+    return "".join(ch for ch in s if unicodedata.category(ch) != "Mn").lower()
+
+
+def _reset_keys(keys):
+    for k in keys:
+        st.session_state.pop(k, None)
+
+
+def chart_filter(key, df, filters=None, search=None, top=None, defaults=None):
+    """Bộ lọc + tìm kiếm riêng cho 1 biểu đồ, đặt trong popover "🔎 Lọc".
+
+    filters : {cột: nhãn}  -> multiselect (để trống = tất cả)
+    search  : (nhãn, [cột...]) -> ô tìm kiếm (không dấu, chứa chuỗi) trên các cột
+    top     : (mặc định, tối đa) -> slider Top N, trả về kèm
+    defaults: {cột: [giá trị]} -> lựa chọn mặc định của multiselect
+    Trả về (df đã lọc, top_n | None).
+    """
+    filters = {c: l for c, l in (filters or {}).items() if c in df.columns}
+    defaults = defaults or {}
+    fkeys = {c: f"{key}__f_{c}" for c in filters}
+    skey, tkey = f"{key}__q", f"{key}__top"
+    all_keys = [*fkeys.values(), skey, tkey]
+    n_active = (sum(bool(st.session_state.get(k)) and st.session_state.get(k) != defaults.get(c)
+                    for c, k in fkeys.items())
+                + bool(st.session_state.get(skey)))
+    label = "🔎 Lọc" + (f" · {n_active}" if n_active else "")
+    box = (st.popover(label) if hasattr(st, "popover")
+           else st.expander(label, expanded=bool(n_active)))
+
+    top_n = None
+    with box:
+        if search:
+            q = st.text_input(search[0], key=skey, placeholder="gõ để tìm (không cần dấu)…")
+        for c, lbl in filters.items():
+            present = set(df[c].dropna().astype(str).unique())
+            order = (PRIORITY_ORDER if c == "priority_level" else
+                     [str(v) for v in df[c].cat.categories] if str(df[c].dtype) == "category"
+                     else sorted(present))
+            opts = [v for v in order if v in present] + sorted(present - set(order))
+            st.multiselect(lbl, opts, key=fkeys[c], placeholder="Tất cả",
+                           default=[v for v in defaults.get(c, []) if v in opts])
+        if top:
+            top_n = st.slider("Top N", 3, int(top[1]), int(min(top[0], top[1])), key=tkey)
+        st.button("Xoá bộ lọc", key=f"{key}__reset", on_click=_reset_keys, args=(all_keys,))
+
+    out = df
+    for c, k in fkeys.items():
+        sel = st.session_state.get(k)
+        if sel:
+            out = out[out[c].astype(str).isin(sel)]
+    q = (st.session_state.get(skey) or "").strip()
+    if search and q:
+        qf = _fold(q)
+        hit = pd.Series(False, index=out.index)
+        for c in search[1]:
+            if c in out.columns:
+                s = out[c].astype(str)
+                m = {v: _fold(v) for v in s.unique()}
+                hit |= s.map(m).str.contains(qf, regex=False)
+        out = out[hit]
+    if len(out) < len(df):
+        st.caption(f"Đang lọc: {len(out):,} / {len(df):,} bản ghi")
+    return out, top_n
+
+
+def _empty_chart(df):
+    if df is None or df.empty:
+        st.info("Không có dữ liệu khớp bộ lọc.")
+        return True
+    return False
 
 
 def _period_labels(kind, n):
@@ -972,78 +1048,136 @@ elif PAGE.startswith("📊"):
 
     best = (PRECO[PRECO.priority_rank == 1].copy() if PRECO is not None
             else SCORE.sort_values("smart_growth_score").groupby("customer_id").tail(1))
-    best = best.merge(CUST[["customer_id", "customer_segment"]], on="customer_id", how="left")
+    ccols = [c for c in ("customer_segment", "region_code", "customer_type", "branch_id")
+             if c in CUST.columns and c not in best.columns]
+    best = best.merge(CUST[["customer_id", *ccols]], on="customer_id", how="left")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Danh mục khách hàng", f"{N_CUST:,}")
     k2.metric("High opportunities (SGS ≥ 80)", f"{(best.smart_growth_score >= 80).sum():,}")
     k3.metric("Đủ điều kiện tiếp cận", f"{int(eligibility_frame().is_eligible.sum()):,}")
     if FB is not None:
         k4.metric("Tỉ lệ chuyển đổi (RM feedback)", f"{FB.converted_flag.mean()*100:.0f}%")
+    st.caption("Mỗi biểu đồ có nút **🔎 Lọc** riêng: lọc theo phân khúc / nhóm SP / vùng…, "
+               "tìm kiếm không dấu, chọn Top N. Bộ lọc của biểu đồ nào chỉ áp cho biểu đồ đó.")
+
+    F_SEG = {"customer_segment": "Phân khúc"}
+    F_GRP = {"product_group": "Nhóm sản phẩm"}
+    F_PRI = {"priority_level": "Priority"}
+    F_REG = {"region_code": "Vùng", "customer_type": "Loại khách hàng"}
+    S_PROD = ("Tìm sản phẩm", ["product_code", "product_name"])
+
+    def _vc(s, name):
+        """value_counts bỏ các nhóm 0 (cột category)."""
+        v = s.astype(str).value_counts()
+        return v[v > 0].rename_axis(name).reset_index(name="n")
 
     c1, c2 = st.columns(2)
     with c1:
-        pr = (best.priority_level.value_counts().reindex(PRIORITY_ORDER).fillna(0)
-              .rename_axis("priority").reset_index(name="customers"))
-        fig = px.bar(pr, x="priority", y="customers", color="priority",
-                     color_discrete_map=PRIORITY_COLOR)
-        fig.update_layout(title="Phân bố Priority (cơ hội #1 / khách)",
-                          showlegend=False, height=360, xaxis_title="")
-        st.plotly_chart(fig, width="stretch")
+        st.markdown("**Phân bố Priority (cơ hội #1 / khách)**")
+        f, _ = chart_filter("mi_pri", best, {**F_SEG, **F_GRP, **F_REG}, S_PROD)
+        if not _empty_chart(f):
+            pr = (f.priority_level.astype(str).value_counts().reindex(PRIORITY_ORDER).fillna(0)
+                  .rename_axis("priority").reset_index(name="customers"))
+            fig = px.bar(pr, x="priority", y="customers", color="priority",
+                         color_discrete_map=PRIORITY_COLOR, text="customers")
+            fig.update_layout(showlegend=False, height=340, xaxis_title="",
+                              margin=dict(t=20))
+            st.plotly_chart(fig, width="stretch")
     with c2:
-        piv = (best.groupby("customer_segment").smart_growth_score.mean()
-               .sort_values().reset_index())
-        fig = px.bar(piv, x="smart_growth_score", y="customer_segment", orientation="h",
-                     color_discrete_sequence=[MSB_RED])
-        fig.update_layout(title="Smart Growth Score bình quân theo phân khúc",
-                          showlegend=False, height=360)
-        st.plotly_chart(fig, width="stretch")
+        st.markdown("**Smart Growth Score theo phân khúc**")
+        f, _ = chart_filter("mi_sgs", best, {**F_GRP, **F_PRI, **F_REG},
+                            ("Tìm phân khúc / sản phẩm", ["customer_segment", *S_PROD[1]]))
+        stat = st.radio("Thống kê", ["Trung bình", "Trung vị"], horizontal=True,
+                        key="mi_sgs__stat", label_visibility="collapsed")
+        if not _empty_chart(f):
+            piv = (f.groupby(f.customer_segment.astype(str)).smart_growth_score
+                   .agg("mean" if stat == "Trung bình" else "median")
+                   .sort_values().reset_index())
+            fig = px.bar(piv, x="smart_growth_score", y="customer_segment", orientation="h",
+                         color_discrete_sequence=[MSB_RED], text_auto=".1f")
+            fig.update_layout(showlegend=False, height=310, yaxis_title="",
+                              xaxis_title=f"SGS ({stat.lower()})", margin=dict(t=20))
+            st.plotly_chart(fig, width="stretch")
 
     c3, c4 = st.columns(2)
     with c3:
+        st.markdown("**Next Best Product #1 — cơ cấu**")
         pcol = "product_name" if "product_name" in best.columns else "recommended_product_id"
-        nbp = best[pcol].value_counts()
-        top = nbp.head(9).rename_axis("product").reset_index(name="n")
-        if len(nbp) > 9:
-            top = pd.concat([top, pd.DataFrame([{"product": "Khác", "n": int(nbp.iloc[9:].sum())}])])
-        fig = px.pie(top, values="n", names="product", color_discrete_sequence=PALETTE, hole=0.5)
-        fig.update_layout(title="Next Best Product #1 — cơ cấu (35 SP)", height=380)
-        st.plotly_chart(fig, width="stretch")
+        f, top_n = chart_filter("mi_nbp", best, {**F_SEG, **F_GRP, **F_PRI, **F_REG}, S_PROD,
+                                top=(9, 20))
+        if not _empty_chart(f):
+            nbp = f[pcol].astype(str).value_counts()
+            nbp = nbp[nbp > 0]
+            top = nbp.head(top_n).rename_axis("product").reset_index(name="n")
+            if len(nbp) > top_n:
+                top = pd.concat([top, pd.DataFrame([{"product": "Khác",
+                                                     "n": int(nbp.iloc[top_n:].sum())}])])
+            fig = px.pie(top, values="n", names="product", color_discrete_sequence=PALETTE,
+                         hole=0.5)
+            fig.update_layout(height=380, margin=dict(t=20))
+            st.plotly_chart(fig, width="stretch")
     with c4:
         if PDEM is not None:
-            d = (PDEM.groupby("product_code").expected_adopters_90d.sum()
-                 .sort_values(ascending=False).head(12).rename_axis("product").reset_index(name="exp90"))
-            fig = px.bar(d, x="exp90", y="product", orientation="h",
-                         color_discrete_sequence=[MSB_INK])
-            fig.update_layout(title="Dự báo mở mới 90 ngày (top 12)", height=380,
-                              yaxis=dict(autorange="reversed"), yaxis_title="")
-            st.plotly_chart(fig, width="stretch")
+            st.markdown("**Dự báo mở mới 90 ngày**")
+            f, top_n = chart_filter("mi_dem", PDEM, {"product_group": "Nhóm sản phẩm",
+                                                     "segment": "Phân khúc"},
+                                    ("Tìm sản phẩm", ["product_code"]), top=(12, 35))
+            if not _empty_chart(f):
+                d = (f.groupby(f.product_code.astype(str)).expected_adopters_90d.sum()
+                     .sort_values(ascending=False).head(top_n)
+                     .rename_axis("product").reset_index(name="exp90"))
+                fig = px.bar(d, x="exp90", y="product", orientation="h",
+                             color_discrete_sequence=[MSB_INK], text_auto=",.0f")
+                fig.update_layout(height=max(300, 26 * len(d) + 80), margin=dict(t=20),
+                                  yaxis=dict(autorange="reversed"), yaxis_title="",
+                                  xaxis_title=f"KH mới dự kiến (top {len(d)})")
+                st.plotly_chart(fig, width="stretch")
 
     c5, c6 = st.columns(2)
     with c5:
-        grp = best.get("product_group")
-        if grp is not None:
-            g = grp.value_counts().rename_axis("nhóm").reset_index(name="n")
-            fig = px.bar(g, x="nhóm", y="n", color="nhóm", color_discrete_sequence=PALETTE)
-            fig.update_layout(title="Cơ hội #1 theo nhóm sản phẩm", showlegend=False, height=340)
-            st.plotly_chart(fig, width="stretch")
+        if "product_group" in best.columns:
+            st.markdown("**Cơ hội #1 theo nhóm sản phẩm**")
+            f, _ = chart_filter("mi_grp", best, {**F_SEG, **F_PRI, **F_REG}, S_PROD)
+            if not _empty_chart(f):
+                g = _vc(f.product_group, "nhóm")
+                fig = px.bar(g, x="nhóm", y="n", color="nhóm", color_discrete_sequence=PALETTE,
+                             text="n")
+                fig.update_layout(showlegend=False, height=320, margin=dict(t=20))
+                st.plotly_chart(fig, width="stretch")
     with c6:
         if FB is not None:
-            oc = FB.customer_response.value_counts().rename_axis("response").reset_index(name="n")
-            fig = px.bar(oc, x="response", y="n", color_discrete_sequence=[MSB_INK])
-            fig.update_layout(title="Kết quả hành động RM (feedback loop)",
-                              showlegend=False, height=340, xaxis_title="")
-            st.plotly_chart(fig, width="stretch")
+            st.markdown("**Kết quả hành động RM (feedback loop)**")
+            fb = FB.merge(CUST[["customer_id", "customer_segment", "branch_id"]],
+                          on="customer_id", how="left")
+            f, _ = chart_filter("mi_fb", fb, {"action_type": "Loại hành động",
+                                              "result_status": "Kết quả liên hệ",
+                                              "customer_segment": "Phân khúc"},
+                                ("Tìm RM / chi nhánh / khách / lý do",
+                                 ["rm_id", "branch_id", "customer_id", "reason_not_interested"]))
+            if not _empty_chart(f):
+                oc = _vc(f.customer_response, "response")
+                fig = px.bar(oc, x="response", y="n", color_discrete_sequence=[MSB_INK], text="n")
+                fig.update_layout(showlegend=False, height=320, xaxis_title="",
+                                  margin=dict(t=20))
+                st.plotly_chart(fig, width="stretch")
 
-    st.subheader("Xếp hạng chi nhánh theo số cơ hội High")
+    st.subheader("Xếp hạng chi nhánh theo số cơ hội")
     src = PRECO
-    hi = src[src.priority_level.isin(["Very High", "High"])]
-    if "branch_id" not in hi.columns:
-        hi = hi.merge(CUST[["customer_id", "branch_id"]], on="customer_id", how="left")
-    br = (hi.groupby("branch_id").size().sort_values(ascending=False).head(20)
-          .rename_axis("branch_id").reset_index(name="n"))
-    fig = px.bar(br, x="branch_id", y="n", color_discrete_sequence=[MSB_RED])
-    fig.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="cơ hội High")
-    st.plotly_chart(fig, width="stretch")
+    if "branch_id" not in src.columns:
+        src = src.merge(CUST[["customer_id", "branch_id"]], on="customer_id", how="left")
+    src = src.merge(CUST[["customer_id", *[c for c in ("customer_segment", "region_code")
+                                          if c in CUST.columns]]], on="customer_id", how="left")
+    f, top_n = chart_filter("mi_br", src, {**F_PRI, **F_GRP, **F_SEG,
+                                           "region_code": "Vùng"},
+                            ("Tìm chi nhánh / sản phẩm", ["branch_id", *S_PROD[1]]),
+                            top=(20, 60), defaults={"priority_level": ["Very High", "High"]})
+    if not _empty_chart(f):
+        br = (f.groupby(f.branch_id.astype(str)).size().sort_values(ascending=False).head(top_n)
+              .rename_axis("branch_id").reset_index(name="n"))
+        fig = px.bar(br, x="branch_id", y="n", color_discrete_sequence=[MSB_RED], text="n")
+        fig.update_layout(showlegend=False, height=340, xaxis_title="",
+                          yaxis_title="số cơ hội", margin=dict(t=20))
+        st.plotly_chart(fig, width="stretch")
 
 
 # ==========================================================================
@@ -1192,42 +1326,71 @@ elif PAGE.startswith("🛍️"):
 
     # ---- Dự báo cầu -------------------------------------------------
     with tab2:
-        d = (PDEM.groupby(["product_code", "product_group"])
-             .agg(eligible=("eligible_customers", "sum"),
-                  holders=("current_holders", "max"),
-                  exp30=("expected_adopters_30d", "sum"),
-                  exp60=("expected_adopters_60d", "sum"),
-                  exp90=("expected_adopters_90d", "sum"),
-                  avg_p=("avg_propensity", "mean")).reset_index()
-             .sort_values("exp90", ascending=False))
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Dự báo mở mới 30 ngày", f"{d.exp30.sum():,.0f}")
-        c2.metric("60 ngày", f"{d.exp60.sum():,.0f}")
-        c3.metric("90 ngày", f"{d.exp90.sum():,.0f}")
-        fig = px.bar(d.head(20), x="exp90", y="product_code", orientation="h", color="product_group",
-                     color_discrete_sequence=PALETTE, text="exp90")
-        fig.update_layout(title="Dự báo mở mới 90 ngày theo sản phẩm (top 20)", height=560,
-                          yaxis_title="", yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, width="stretch")
-        seg_sel = st.selectbox("Xem chi tiết theo phân khúc", ["(tất cả)"] + sorted(PDEM.segment.dropna().unique()))
-        dd = PDEM if seg_sel == "(tất cả)" else PDEM[PDEM.segment == seg_sel]
-        st.dataframe(dd.sort_values("expected_adopters_90d", ascending=False)[
-            ["product_code", "product_group", "segment", "eligible_customers", "current_holders",
-             "avg_propensity", "high_propensity", "expected_adopters_90d"]],
-            use_container_width=True, hide_index=True, height=360)
+        fdem, top_n = chart_filter("pd_dem", PDEM, {"product_group": "Nhóm sản phẩm",
+                                                    "segment": "Phân khúc"},
+                                   ("Tìm sản phẩm", ["product_code"]), top=(20, 35))
+        if not _empty_chart(fdem):
+            d = (fdem.assign(product_code=fdem.product_code.astype(str),
+                             product_group=fdem.product_group.astype(str))
+                 .groupby(["product_code", "product_group"])
+                 .agg(eligible=("eligible_customers", "sum"),
+                      holders=("current_holders", "max"),
+                      exp30=("expected_adopters_30d", "sum"),
+                      exp60=("expected_adopters_60d", "sum"),
+                      exp90=("expected_adopters_90d", "sum"),
+                      avg_p=("avg_propensity", "mean")).reset_index()
+                 .sort_values("exp90", ascending=False))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Dự báo mở mới 30 ngày", f"{d.exp30.sum():,.0f}")
+            c2.metric("60 ngày", f"{d.exp60.sum():,.0f}")
+            c3.metric("90 ngày", f"{d.exp90.sum():,.0f}")
+            dh = d.head(top_n)
+            fig = px.bar(dh, x="exp90", y="product_code", orientation="h", color="product_group",
+                         color_discrete_sequence=PALETTE, text="exp90")
+            fig.update_layout(title=f"Dự báo mở mới 90 ngày theo sản phẩm (top {len(dh)})",
+                              height=max(320, 26 * len(dh) + 120), yaxis_title="",
+                              yaxis=dict(categoryorder="array",
+                                         categoryarray=dh.product_code.tolist()[::-1]))
+            st.plotly_chart(fig, width="stretch")
+            seg_sel = st.selectbox("Xem chi tiết theo phân khúc",
+                                   ["(tất cả)"] + sorted(fdem.segment.dropna().astype(str).unique()))
+            dd = fdem if seg_sel == "(tất cả)" else fdem[fdem.segment.astype(str) == seg_sel]
+            st.dataframe(dd.sort_values("expected_adopters_90d", ascending=False)[
+                ["product_code", "product_group", "segment", "eligible_customers", "current_holders",
+                 "avg_propensity", "high_propensity", "expected_adopters_90d"]],
+                use_container_width=True, hide_index=True, height=360)
 
     # ---- Phân khúc × Sản phẩm --------------------------------------
     with tab3:
         aff = PAFF.set_index(PAFF.columns[0]) if PAFF.columns[0] != "product_code" else PAFF.set_index("product_code")
         aff = aff.select_dtypes("number")
-        fig = px.imshow(aff, aspect="auto",
-                        color_continuous_scale=["#eff6ff", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
-                        labels=dict(color="propensity TB"))
-        fig.update_layout(title="Ma trận phân khúc × sản phẩm (propensity trung bình)",
-                          height=620,
-                          margin=dict(l=60, r=30, t=70, b=60),
-                          coloraxis_colorbar=dict(thickness=14, len=0.8, tickformat=".0%"))
-        st.plotly_chart(fig, width="stretch")
+        aff.index = aff.index.astype(str)
+        affl = aff.reset_index(names="product_code")
+        affl["product_group"] = affl.product_code.map(
+            dict(zip(CAT.product_code.astype(str), CAT.product_group.astype(str))))
+        h1, h2 = st.columns([1, 3])
+        with h1:
+            fa, top_n = chart_filter("pd_aff", affl, {"product_group": "Nhóm sản phẩm"},
+                                     ("Tìm sản phẩm", ["product_code"]),
+                                     top=(len(affl), len(affl)))
+        seg_cols = h2.multiselect("Phân khúc hiển thị", list(aff.columns), default=list(aff.columns),
+                                  key="pd_aff__segs")
+        sort_by = h2.selectbox("Sắp xếp theo", ["(mặc định)", "Trung bình các phân khúc", *seg_cols],
+                               key="pd_aff__sort")
+        if seg_cols and not _empty_chart(fa):
+            hm = fa.set_index("product_code")[seg_cols]
+            if sort_by != "(mặc định)":
+                key_s = hm.mean(axis=1) if sort_by.startswith("Trung bình") else hm[sort_by]
+                hm = hm.loc[key_s.sort_values(ascending=False).index]
+            hm = hm.head(top_n)
+            fig = px.imshow(hm, aspect="auto", text_auto=".0%",
+                            color_continuous_scale=["#eff6ff", "#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"],
+                            labels=dict(color="propensity TB"))
+            fig.update_layout(title="Ma trận phân khúc × sản phẩm (propensity trung bình)",
+                              height=max(320, 20 * len(hm) + 140),
+                              margin=dict(l=60, r=30, t=70, b=60),
+                              coloraxis_colorbar=dict(thickness=14, len=0.8, tickformat=".0%"))
+            st.plotly_chart(fig, width="stretch")
 
     # ---- Gợi ý theo khách hàng ------------------------------------
     with tab4:
@@ -1285,27 +1448,52 @@ elif PAGE.startswith("🔁"):
                               "🔧 Hiệu chỉnh đã áp", "✍️ RM gửi feedback"])
 
     with t1:
-        g = (RFB.groupby("product_group").agg(n=("feedback_id", "count"),
-             agree=("agree_flag", "mean"), conv=("converted_flag", "mean")).reset_index())
+        rfb = RFB.astype({c: str for c in ("product_code", "product_group", "segment", "rm_verdict")
+                          if c in RFB.columns})
+        F_RFB = {"product_group": "Nhóm sản phẩm", "segment": "Phân khúc",
+                 "rm_verdict": "Phản hồi RM"}
+        S_RFB = ("Tìm sản phẩm / khách", ["product_code", "customer_id"])
         c1, c2 = st.columns(2)
         with c1:
-            fig = px.bar(g, x="product_group", y="agree", color="product_group",
-                         color_discrete_sequence=PALETTE, text=g.agree.map(lambda v: f"{v:.0%}"))
-            fig.update_layout(title="% RM đồng ý với đề xuất AI, theo nhóm", showlegend=False,
-                              height=360, yaxis_tickformat=".0%", xaxis_title="")
-            st.plotly_chart(fig, width="stretch")
+            st.markdown("**% RM đồng ý với đề xuất AI, theo nhóm**")
+            f, _ = chart_filter("ag_agree", rfb, {k: F_RFB[k] for k in ("segment", "rm_verdict")},
+                                S_RFB)
+            if not _empty_chart(f):
+                g = (f.groupby("product_group").agg(n=("feedback_id", "count"),
+                     agree=("agree_flag", "mean"), conv=("converted_flag", "mean")).reset_index())
+                fig = px.bar(g, x="product_group", y="agree", color="product_group",
+                             color_discrete_sequence=PALETTE,
+                             text=g.agree.map(lambda v: f"{v:.0%}"), hover_data=["n", "conv"])
+                fig.update_layout(showlegend=False, height=340, yaxis_tickformat=".0%",
+                                  xaxis_title="", margin=dict(t=20))
+                st.plotly_chart(fig, width="stretch")
         with c2:
-            v = RFB.rm_verdict.value_counts().rename_axis("verdict").reset_index(name="n")
-            fig = px.bar(v, x="n", y="verdict", orientation="h", color_discrete_sequence=[MSB_INK])
-            fig.update_layout(title="Phân bố phản hồi RM", height=360, yaxis_title="")
+            st.markdown("**Phân bố phản hồi RM**")
+            f, _ = chart_filter("ag_verdict", rfb,
+                                {k: F_RFB[k] for k in ("product_group", "segment")}, S_RFB)
+            if not _empty_chart(f):
+                v = f.rm_verdict.value_counts().rename_axis("verdict").reset_index(name="n")
+                fig = px.bar(v, x="n", y="verdict", orientation="h",
+                             color_discrete_sequence=[MSB_INK], text="n")
+                fig.update_layout(height=340, yaxis_title="", margin=dict(t=20))
+                st.plotly_chart(fig, width="stretch")
+
+        st.markdown("**Heatmap đồng thuận: sản phẩm × phân khúc** (đỏ = AI sai nhiều)")
+        h1, h2 = st.columns([1, 3])
+        with h1:
+            f, top_n = chart_filter("ag_heat", rfb, F_RFB, S_RFB, top=(40, 40))
+        min_n = h2.slider("Số phản hồi tối thiểu / ô", 1, 50, 1, key="ag_heat__minn",
+                          help="Ẩn các ô có quá ít phản hồi (tỉ lệ không ổn định).")
+        if not _empty_chart(f):
+            agg = f.groupby(["product_code", "segment"]).agg(
+                agree=("agree_flag", "mean"), n=("feedback_id", "count")).reset_index()
+            agg.loc[agg.n < min_n, "agree"] = np.nan
+            heat = agg.pivot(index="product_code", columns="segment", values="agree")
+            heat = heat.loc[heat.mean(axis=1).sort_values().index].head(top_n)   # sai nhiều lên đầu
+            fig = px.imshow(heat, color_continuous_scale="RdYlGn", zmin=0.2, zmax=0.9,
+                            aspect="auto", text_auto=".0%", labels=dict(color="% đồng ý"))
+            fig.update_layout(height=max(320, 20 * len(heat) + 140), margin=dict(t=20))
             st.plotly_chart(fig, width="stretch")
-        heat = (RFB.groupby(["product_code", "segment"]).agree_flag.mean().reset_index()
-                .pivot(index="product_code", columns="segment", values="agree_flag"))
-        fig = px.imshow(heat, color_continuous_scale="RdYlGn", zmin=0.2, zmax=0.9, aspect="auto",
-                        labels=dict(color="% đồng ý"))
-        fig.update_layout(title="Heatmap đồng thuận: sản phẩm × phân khúc (đỏ = AI sai nhiều)",
-                          height=760)
-        st.plotly_chart(fig, width="stretch")
 
     with t2:
         st.markdown("Agent chỉ kết luận **“mô hình sai thật”** khi: đủ mẫu (≥25 phản hồi) · "
