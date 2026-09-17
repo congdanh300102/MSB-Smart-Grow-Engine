@@ -309,6 +309,239 @@ def fmt_vnd(x):
     return f"{x:,.0f}"
 
 
+def _period_labels(kind, n):
+    """Nhãn kỳ kế hoạch bắt đầu từ kỳ hiện tại."""
+    today = pd.Timestamp.today()
+    if kind == "Tháng":
+        return [str(p) for p in pd.period_range(today, periods=n, freq="M")]
+    if kind == "Quý":
+        return [f"{p.year}-Q{p.quarter}" for p in pd.period_range(today, periods=n, freq="Q")]
+    y, h = today.year, 1 if today.month <= 6 else 2
+    out = []
+    for _ in range(n):
+        out.append(f"{y}-H{h}")
+        y, h = (y, 2) if h == 1 else (y + 1, 1)
+    return out
+
+
+PARAM_HELP = {
+    "w": "0.45 < 0.5: P_LR học từ dữ liệu (AUC ~0.70) nhưng chỉ ở cấp NHÓM sản phẩm, "
+         "nên để rule fit (đặc thù từng SP) giữ vai trò chính khi xếp hạng trong nhóm.",
+    "conv": "14%: tỉ lệ chuyển đổi nền trong 90 ngày của khách đủ điều kiện ĐÃ được tiếp cận "
+            "(giả định cho dữ liệu synthetic — hiệu chỉnh theo tỉ lệ converted của RM feedback).",
+    "reach": "55%: năng lực RM/kênh chỉ phủ khoảng một nửa tệp đủ điều kiện mỗi quý "
+             "(giới hạn tần suất liên hệ, opt-out, năng lực RM).",
+    "growth": "Mặc định 0%: không giả định hiệu ứng chiến dịch tích lũy nếu chưa có bằng chứng.",
+}
+
+
+def render_param_rationale():
+    """Giải thích vì sao chọn các tham số của mô hình propensity & kế hoạch."""
+    with st.expander("ℹ️ Vì sao chọn các tham số này?", expanded=False):
+        ev = []
+        if METRIC is not None:
+            auc = METRIC[(METRIC.metric_name == "roc_auc") & (METRIC.dataset_split == "test")]
+            if not auc.empty:
+                ev.append(f"ROC-AUC test của LR: **{auc.metric_value.min():.2f}–"
+                          f"{auc.metric_value.max():.2f}**")
+        if PCOMP is not None:
+            lr = PCOMP[PCOMP.lr_blended]
+            ev.append(f"P_LR trung bình nhóm neo **{lr.avg_anchor_lr.mean():.0%}** vs fit_score "
+                      f"**{lr.avg_fit_score.mean():.0%}**")
+        if FB is not None and "converted_flag" in FB:
+            ev.append(f"Tỉ lệ chuyển đổi quan sát từ RM feedback **{FB.converted_flag.mean():.0%}** "
+                      "(chỉ trên cơ hội ưu tiên cao đã được RM xử lý → cao hơn mức nền toàn tệp)")
+        if ev:
+            st.markdown("**Bằng chứng từ dữ liệu hiện tại:** " + " · ".join(ev))
+
+        st.markdown("""
+#### 1. Cấu trúc hybrid — vì sao không dùng thuần LR hoặc thuần rule?
+- **LR chỉ có nhãn ở cấp nhóm** (thẻ tín dụng, vay, tiền gửi): dữ liệu lịch sử đủ để huấn luyện
+  cho 3–4 nhóm lớn, **không đủ** cho từng mã sản phẩm trong 35 SP. Trong cùng nhóm, mọi SP nhận
+  **cùng một** P_LR → LR không phân biệt được *Thẻ Travel* với *Thẻ Family*.
+- **Rule fit** mã hoá "Khách hàng/Nhu cầu phù hợp" trong danh mục MSB → phân biệt được từng SP,
+  nhưng là tri thức chuyên gia, không học từ hành vi.
+- Kết hợp: rule quyết định **SP nào hợp với khách**, LR điều chỉnh **khách nào dễ chuyển đổi hơn**.
+
+#### 2. Tham số mô hình
+
+| Tham số | Giá trị | Lý do chọn | Khi nào nên chỉnh |
+|---|---|---|---|
+| `w` (trọng số LR) | **0.45** | < 0.5 để rule fit (đặc thù SP) giữ vai trò chính khi xếp hạng trong nhóm; đủ lớn để LR (AUC ~0.70, có kiểm định CV) kéo lệch đáng kể giữa các khách. P_LR thấp hơn fit nên w lớn sẽ kéo propensity nhóm neo xuống, làm lệch so sánh với SP chỉ-rule | ↑ khi có nhãn chuyển đổi theo từng SP và AUC > 0.75; ↓ khi calibration LR kém |
+| Nhóm neo | Thẻ tín dụng · Tiền gửi · Vay | 3 nhóm có mô hình LR đã huấn luyện tương ứng (P001, P007, P004) | Thêm nhóm khi có mô hình mới |
+| `w = 0` cho CASA, thẻ ghi nợ | — | Không có LR tương ứng; sản phẩm nền tảng, quyết định chủ yếu bởi điều kiện/nhu cầu | Khi huấn luyện LR cho CASA |
+| Nhiễu ±0.02, chặn [0.01, 0.99] | — | Tránh xác suất tuyệt đối 0/1 và phá thế hoà khi xếp hạng | Giữ nguyên |
+| Ngưỡng *high propensity* | **0.6** | Tách nhóm khách có xác suất cao hơn rõ rệt so với mức trung bình | Theo năng lực RM |
+| SGS High | **≥ 80** | Top cơ hội được ưu tiên liên hệ trong 48 giờ, giữ số lượng vừa năng lực RM | Theo năng lực RM |
+
+#### 3. Tham số dự báo & kế hoạch
+
+| Tham số | Giá trị | Lý do chọn | Khi nào nên chỉnh |
+|---|---|---|---|
+| Tỉ lệ chuyển đổi nền 90 ngày | **14%** | Giả định cho khách đủ điều kiện đã được tiếp cận (dữ liệu synthetic) | Thay bằng tỉ lệ converted thực tế từ RM feedback / chiến dịch |
+| Độ phủ tiếp cận | **55%** | RM/kênh chỉ phủ khoảng một nửa tệp mỗi quý (giới hạn tần suất, opt-out, năng lực RM) | Theo số RM & ngân sách kênh của kỳ |
+| Phân bổ 30/60/90 ngày | **38% / 70% / 100%** | Phản hồi chiến dịch dồn về đầu kỳ rồi bão hoà | Theo đường cong chuyển đổi thực tế |
+| Quy đổi độ dài kỳ | ngày / 90 | Mỗi kỳ là một đợt tiếp cận mới, quy đổi tuyến tính từ quý (đơn giản hoá) | — |
+| Tệp còn lại | 1 − lũy kế / tệp đủ ĐK | Khách đã mở SP không còn là cơ hội → dự báo giảm dần qua các kỳ | — |
+| Chỉ tiêu mặc định | **110%** dự báo nền | Kế hoạch kỳ vọng cao hơn mức "tự nhiên" ~10% | Nhập theo KPI thực tế |
+| Ngưỡng đánh giá | **≥100% Đạt · ≥85% Sát · <85% Rủi ro** | 85% là mức hụt còn bù được bằng chiến dịch bổ sung | Theo chính sách KPI |
+| Uplift chiến dịch | **0%** mặc định | Không giả định hiệu ứng khi chưa có kế hoạch cụ thể | Nhập theo chiến dịch từng kỳ |
+
+> Các tham số là **giá trị khởi tạo**: nên hiệu chỉnh định kỳ từ RM feedback (trang *AI Agent ·
+> Feedback & Hiệu chỉnh*) và kết quả chiến dịch thực tế.
+""")
+
+
+def render_period_plan(comp):
+    """Hiệu chỉnh tham số kỳ vọng → đánh giá kế hoạch phát triển theo kỳ × sản phẩm trọng tâm.
+
+    Propensity hybrid tuyến tính theo w nên trung bình theo SP tính lại chính xác:
+    P'(w) = w·avg_anchor_lr + (1−w)·avg_fit_score (SP neo), P' = avg_fit_score (SP chỉ rule).
+    Dự báo kỳ k = Σpropensity' × conv × độ phủ × (ngày/90) × (1+uplift_k) × tỉ lệ tệp còn lại.
+    """
+    st.divider()
+    st.subheader("Hiệu chỉnh tham số kỳ vọng — kế hoạch phát triển theo kỳ")
+    if PDEM is None:
+        st.info("Chưa có `agg_product_demand` — không lập được kế hoạch theo kỳ.")
+        return
+    st.caption("Chọn kỳ kế hoạch và sản phẩm trọng tâm, chỉnh tham số mô hình/kênh và nhập "
+               "uplift chiến dịch + chỉ tiêu cho từng kỳ để đánh giá khả năng đạt kế hoạch.")
+
+    DAYS = {"Tháng": 30, "Quý": 90, "Nửa năm": 180}
+    c1, c2, c3 = st.columns([1, 1, 3])
+    kind = c1.selectbox("Độ dài kỳ", list(DAYS), index=1)
+    n_per = c2.number_input("Số kỳ", 1, 12, 4)
+    top3 = comp.sort_values("avg_propensity", ascending=False).product_code.head(3).tolist()
+    focus = c3.multiselect("Sản phẩm trọng tâm", sorted(comp.product_code), default=top3,
+                           max_selections=8)
+    if not focus:
+        st.info("Chọn ít nhất 1 sản phẩm trọng tâm.")
+        return
+
+    p1, p2, p3, p4 = st.columns(4)
+    w_new = p1.slider("Trọng số LR w (SP neo)", 0.0, 0.9, 0.45, 0.05, help=PARAM_HELP["w"])
+    conv = p2.slider("Tỉ lệ chuyển đổi nền / 90 ngày", 0.02, 0.40, 0.14, 0.01,
+                     help=PARAM_HELP["conv"])
+    reach = p3.slider("Độ phủ tiếp cận / kỳ", 0.10, 1.00, 0.55, 0.05, help=PARAM_HELP["reach"])
+    growth = p4.slider("Tăng trưởng uplift mỗi kỳ (%)", -20, 50, 0, 5,
+                       help="Cộng dồn vào uplift của mỗi kỳ tiếp theo. " + PARAM_HELP["growth"])
+
+    periods = _period_labels(kind, int(n_per))
+    days = DAYS[kind]
+
+    base = (PDEM[PDEM.product_code.isin(focus)]
+            .assign(sp=lambda d: d.avg_propensity * d.eligible_customers)
+            .groupby("product_code").agg(eligible=("eligible_customers", "sum"),
+                                         sum_prop=("sp", "sum")).reset_index())
+    cp = comp.set_index("product_code")
+    p_old = base.product_code.map(cp.avg_propensity)
+    p_new = np.where(base.product_code.map(cp.lr_blended).astype(bool),
+                     w_new * base.product_code.map(cp.avg_anchor_lr)
+                     + (1 - w_new) * base.product_code.map(cp.avg_fit_score),
+                     base.product_code.map(cp.avg_fit_score))
+    base["p_old"] = p_old.values
+    base["p_new"] = p_new
+    base["sum_prop_new"] = base.sum_prop * np.where(p_old > 0, p_new / p_old, 1.0)
+    base["per_period"] = base.sum_prop_new * conv * reach * days / 90
+
+    # bảng nhập liệu: uplift + chỉ tiêu cho từng SP × kỳ
+    grid = pd.DataFrame([(p, k) for p in focus for k in periods], columns=["Sản phẩm", "Kỳ"])
+    bp = base.set_index("product_code")
+    grid["Uplift chiến dịch (%)"] = 0
+    grid["Chỉ tiêu (KH mới)"] = [
+        int(round(bp.per_period.get(p, 0) * 1.1)) for p in grid["Sản phẩm"]]
+    ed_key = f"plan_{kind}_{n_per}_{'-'.join(focus)}"
+    st.markdown("**Kỳ vọng & chỉ tiêu theo kỳ** (sửa trực tiếp trong bảng)")
+    grid = st.data_editor(
+        grid, key=ed_key, hide_index=True, use_container_width=True,
+        disabled=["Sản phẩm", "Kỳ"],
+        column_config={
+            "Uplift chiến dịch (%)": st.column_config.NumberColumn(min_value=-50, max_value=300, step=5),
+            "Chỉ tiêu (KH mới)": st.column_config.NumberColumn(min_value=0, step=10),
+        })
+
+    rows = []
+    for p in focus:
+        if p not in bp.index:
+            continue
+        b, cum = bp.loc[p], 0.0
+        g = grid[grid["Sản phẩm"] == p]
+        for i, (_, r) in enumerate(g.iterrows()):
+            uplift = float(r["Uplift chiến dịch (%)"] or 0) + growth * i
+            pool = max(0.0, 1 - cum / b.eligible) if b.eligible else 0.0
+            fc = b.per_period * (1 + uplift / 100) * pool
+            cum += fc
+            tgt = float(r["Chỉ tiêu (KH mới)"] or 0)
+            rows.append({"Sản phẩm": p, "Kỳ": r["Kỳ"], "uplift áp dụng (%)": uplift,
+                         "Dự báo": round(fc), "Chỉ tiêu": round(tgt),
+                         "% đạt": fc / tgt if tgt else np.nan,
+                         "Dự báo lũy kế": round(cum), "Tệp còn lại": pool})
+    res = pd.DataFrame(rows)
+    if res.empty:
+        st.info("Không có dữ liệu cầu cho các sản phẩm đã chọn.")
+        return
+    res["Chỉ tiêu lũy kế"] = res.groupby("Sản phẩm")["Chỉ tiêu"].cumsum()
+    res["Đánh giá"] = np.select([res["% đạt"] >= 1, res["% đạt"] >= 0.85],
+                                ["Đạt", "Sát chỉ tiêu"], default="Rủi ro")
+    # uplift cần để đạt chỉ tiêu (xấp xỉ, giữ nguyên tệp còn lại)
+    res["Uplift cần (%)"] = np.where(
+        res["% đạt"] < 1,
+        ((1 + res["uplift áp dụng (%)"] / 100) / res["% đạt"] - 1) * 100,
+        res["uplift áp dụng (%)"]).round(0)
+
+    tot_fc, tot_tg = res["Dự báo"].sum(), res["Chỉ tiêu"].sum()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"Dự báo {len(periods)} kỳ", f"{tot_fc:,.0f}")
+    m2.metric("Tổng chỉ tiêu", f"{tot_tg:,.0f}")
+    m3.metric("Tỉ lệ đạt kế hoạch", f"{tot_fc / tot_tg:.0%}" if tot_tg else "—",
+              delta=f"{tot_fc - tot_tg:+,.0f} KH")
+    m4.metric("Kỳ × SP rủi ro", int((res["Đánh giá"] == "Rủi ro").sum()))
+
+    c1, c2 = st.columns(2)
+    with c1:
+        hm = res.pivot(index="Sản phẩm", columns="Kỳ", values="% đạt").reindex(
+            index=focus, columns=periods)
+        fig = px.imshow(hm, text_auto=".0%", aspect="auto", zmin=0.5, zmax=1.5,
+                        color_continuous_scale=["#E4002B", "#F4A300", "#f5f5f5", "#2E8B8B"])
+        fig.update_layout(title="% đạt chỉ tiêu theo kỳ × sản phẩm", height=360,
+                          coloraxis_colorbar=dict(tickformat=".0%", thickness=12),
+                          xaxis_title="", yaxis_title="")
+        st.plotly_chart(fig, width="stretch")
+    with c2:
+        fig = go.Figure()
+        for i, p in enumerate(focus):
+            d = res[res["Sản phẩm"] == p]
+            col = PALETTE[i % len(PALETTE)]
+            fig.add_scatter(x=d["Kỳ"], y=d["Dự báo lũy kế"], name=f"{p} · dự báo",
+                            mode="lines+markers", line=dict(color=col), legendgroup=p)
+            fig.add_scatter(x=d["Kỳ"], y=d["Chỉ tiêu lũy kế"], name=f"{p} · chỉ tiêu",
+                            mode="lines", line=dict(color=col, dash="dash"), legendgroup=p)
+        fig.update_layout(title="Lũy kế: dự báo (liền) vs chỉ tiêu (đứt)", height=360,
+                          yaxis_title="KH mới", legend=dict(font=dict(size=10)))
+        st.plotly_chart(fig, width="stretch")
+
+    fig = px.bar(res, x="Kỳ", y="Dự báo", color="Sản phẩm", barmode="group",
+                 color_discrete_sequence=PALETTE, category_orders={"Kỳ": periods})
+    fig.update_layout(title="Dự báo khách hàng mới theo kỳ", height=340, xaxis_title="")
+    st.plotly_chart(fig, width="stretch")
+
+    out = res[["Sản phẩm", "Kỳ", "uplift áp dụng (%)", "Dự báo", "Chỉ tiêu", "% đạt",
+               "Đánh giá", "Uplift cần (%)", "Dự báo lũy kế", "Tệp còn lại"]].copy()
+    out["% đạt"] = (out["% đạt"] * 100).round(0)
+    out["Tệp còn lại"] = (out["Tệp còn lại"] * 100).round(1)
+    st.dataframe(out, use_container_width=True, hide_index=True,
+                 column_config={"% đạt": st.column_config.NumberColumn(format="%.0f%%"),
+                                "Tệp còn lại": st.column_config.NumberColumn(format="%.1f%%")})
+
+    with st.expander("Tác động của w lên propensity (SP trọng tâm)"):
+        st.dataframe(base.rename(columns={"product_code": "Sản phẩm", "eligible": "Tệp đủ ĐK",
+                                          "p_old": "P hiện tại (w gốc)", "p_new": f"P mới (w={w_new})",
+                                          "per_period": "Dự báo nền / kỳ"})
+                     [["Sản phẩm", "Tệp đủ ĐK", "P hiện tại (w gốc)", f"P mới (w={w_new})",
+                       "Dự báo nền / kỳ"]].round(3),
+                     use_container_width=True, hide_index=True)
+
+
 # ==========================================================================
 # SIDEBAR
 # ==========================================================================
@@ -818,29 +1051,51 @@ elif PAGE.startswith("📊"):
 # ==========================================================================
 elif PAGE.startswith("🤖"):
     st.title("Mô hình Propensity — Hybrid (Logistic Regression + Rule fit)")
+    n_lr = int(PCOMP.lr_blended.sum()) if PCOMP is not None else 27
+    n_rule = len(PCOMP) - n_lr if PCOMP is not None else 8
     st.markdown(
         r"$P_{\text{sp}} = w\cdot P_{\text{LR}}(\text{nhóm neo}) + (1-w)\cdot \text{fit\_score}(\text{rule})$"
         "  \n"
-        r"$P_{\text{LR}} = \sigma(b + \sum_i w_i X_i)$  — 6 mô hình neo: Thẻ tín dụng · Vay · "
-        "Tiền gửi · Đầu tư ($w=0.45$).  31 sản phẩm còn lại: $w=0$ → chỉ rule fit theo "
+        r"$P_{\text{LR}} = \sigma(b + \sum_i w_i X_i)$  — 3 nhóm neo: Thẻ tín dụng · Tiền gửi · Vay "
+        f"($w=0.45$, {n_lr} SP).  {n_rule} SP còn lại (CASA, thẻ ghi nợ): $w=0$ → chỉ rule fit theo "
         "\"Khách hàng/Nhu cầu phù hợp\".")
+    render_param_rationale()
 
     if PCOMP is not None:
-        st.subheader("Cấu thành propensity — 35 sản phẩm MSB")
         cc = PCOMP.copy()
-        cc["kiểu"] = np.where(cc.lr_blended, "LR + rule (w=0.45)", "chỉ rule (w=0)")
-        m = cc.melt(id_vars=["product_code", "product_group", "kiểu"],
+        st.subheader(f"Cấu thành propensity — top sản phẩm ({len(cc)} SP MSB)")
+        k1, k2, k3 = st.columns([1, 1, 2])
+        top_n = k1.slider("Số sản phẩm hiển thị", 5, len(cc), min(10, len(cc)), 1)
+        SORT_BY = {"propensity (hybrid)": "avg_propensity", "fit_score (rule)": "avg_fit_score",
+                   "đóng góp LR": "lr_contribution"}
+        sort_lbl = k2.selectbox("Xếp hạng theo", list(SORT_BY))
+        grp_sel = k3.multiselect("Nhóm sản phẩm", sorted(cc.product_group.unique()),
+                                 default=sorted(cc.product_group.unique()))
+        cc = (cc[cc.product_group.isin(grp_sel)]
+              .sort_values(SORT_BY[sort_lbl], ascending=False).head(top_n))
+        order = cc.product_code.tolist()
+        m = cc.melt(id_vars=["product_code", "product_group"],
                     value_vars=["avg_fit_score", "avg_propensity"],
                     var_name="chỉ số", value_name="giá trị")
         m["chỉ số"] = m["chỉ số"].map({"avg_fit_score": "fit_score (rule)",
                                        "avg_propensity": "propensity (hybrid)"})
-        fig = px.bar(m.sort_values("giá trị"), x="giá trị", y="product_code", color="chỉ số",
-                     barmode="group", color_discrete_sequence=[MSB_INK, MSB_RED], height=760)
-        fig.update_layout(title="fit_score (rule) vs propensity (hybrid) theo sản phẩm",
-                          yaxis_title="")
+        fig = px.bar(m, x="giá trị", y="product_code", color="chỉ số", orientation="h",
+                     barmode="group", color_discrete_sequence=[MSB_INK, MSB_RED],
+                     category_orders={"product_code": order},
+                     height=max(320, 42 * len(order) + 120))
+        fig.update_layout(title=f"Top {len(order)} — fit_score (rule) vs propensity (hybrid), "
+                                f"xếp theo {sort_lbl}",
+                          yaxis_title="", xaxis_tickformat=".0%",
+                          legend=dict(orientation="h", y=1.02, x=0, title=""))
         st.plotly_chart(fig, width="stretch")
+        tb = cc[["product_code", "product_group", "lr_blended", "lr_weight", "avg_fit_score",
+                 "avg_anchor_lr", "avg_propensity", "lr_contribution", "n_eligible"]].copy()
+        tb["lr_blended"] = np.where(tb.lr_blended, "LR + rule", "chỉ rule")
+        st.dataframe(tb, use_container_width=True, hide_index=True)
         st.caption("Chênh lệch propensity − fit_score = đóng góp của mô hình LR nhóm neo "
                    "(âm khi P_LR < fit, dương khi P_LR > fit).")
+
+        render_period_plan(PCOMP)
 
     if METRIC is None or COEF is None:
         st.info("Chưa có artefact LR (`py src/train_models.py --apply`) — chỉ hiển thị phần hybrid ở trên.")
