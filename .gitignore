@@ -19,3 +19,7 @@ data/csv/ai_product_fit.csv
 
 # stlite build artifact (regenerate: py stlite/build.py)
 stlite/site/
+
+# sản phẩm build stlite — chỉ nằm trong stlite/site/, không commit ở gốc repo
+/index.html
+data/parquet/*.csv.gz

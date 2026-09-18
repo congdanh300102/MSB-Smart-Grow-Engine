@@ -3,6 +3,7 @@
 cần server, deploy free lên Hugging Face **Static** Space / GitHub Pages / Netlify.
 
     py stlite/build.py
+    py stlite/build.py --upload danh30012002/msb-smart-growth-engine   # build + đẩy lên Space
 
 -> tạo  stlite/site/  gồm: index.html + README.md + streamlit_app/app.py
         + data/parquet/<các bảng app cần> + models/<report>.
@@ -144,6 +145,17 @@ def _copy(src, dst):
     shutil.copy2(src, dst)
 
 
+def upload(repo_id, message):
+    """Đẩy stlite/site/ lên Static Space (cần `hf auth login` với token quyền Write)."""
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        raise SystemExit("Thiếu huggingface_hub: py -m pip install -U huggingface_hub")
+    info = HfApi().upload_folder(repo_id=repo_id, repo_type="space", folder_path=SITE,
+                                 commit_message=message)
+    print(f"Đã upload -> https://huggingface.co/spaces/{repo_id}\n  commit: {info}")
+
+
 def main():
     if os.path.isdir(SITE):
         shutil.rmtree(SITE)
@@ -186,4 +198,19 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    import sys
+
+    try:  # console Windows cp1252 không in được tiếng Việt
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap =argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    ap.add_argument("--upload", metavar="USER/SPACE",
+                    help="build xong thì upload lên Space, vd danh30012002/msb-smart-growth-engine")
+    ap.add_argument("-m", "--message", default="update dashboard (stlite build)",
+                    help="commit message trên Space")
+    args = ap.parse_args()
     main()
+    if args.upload:
+        upload(args.upload, args.message)

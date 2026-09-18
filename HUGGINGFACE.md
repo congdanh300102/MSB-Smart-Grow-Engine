@@ -1,66 +1,91 @@
-# Deploy lên Hugging Face Spaces (Streamlit SDK)
+# Deploy lên Hugging Face Spaces (Static + stlite)
 
-Free tier HF Spaces: **16 GB RAM / 2 vCPU** → chạy full **25.000 khách hàng** thoải mái
-(khác Streamlit Community Cloud chỉ ~1 GB).
+Space hiện tại: **https://huggingface.co/spaces/danh30012002/msb-smart-growth-engine**
+(`sdk: static`)
 
-Repo đã cấu hình sẵn:
-- YAML header trong [`README.md`](README.md): `sdk: streamlit`, `app_file: streamlit_app/app.py`
-- [`requirements.txt`](requirements.txt): chỉ deps cho app (streamlit / pandas<2.3 / pyarrow / plotly / numpy)
-- `APP_MAX_CUST` mặc định `25000` → không lấy mẫu
+Hugging Face không còn Streamlit Space miễn phí. App được đóng gói bằng
+[stlite](https://github.com/whitphx/stlite): Streamlit chạy bằng WebAssembly **trong trình duyệt
+người xem**, Space chỉ phục vụ file tĩnh. App dùng đủ 25.000 khách hàng, lần đầu tải khoảng 55 MB,
+các lần sau dùng cache.
 
----
-
-## Cách 1 — push cả LFS (đơn giản nhất)
-
-```bash
-# tạo Space trống: https://huggingface.co/new-space  → Owner = bạn,
-#   Space name = msb-smart-growth-engine, SDK = Streamlit, Hardware = CPU basic (free)
-
-git remote add hf https://huggingface.co/spaces/<username>/msb-smart-growth-engine
-git push hf main
-```
-
-- Lần đầu Git LFS upload ~475 MB (5–10 phút). HF hỏi user/token → dùng
-  **Access Token** (https://huggingface.co/settings/tokens, quyền *write*) làm mật khẩu.
-- Space tự build (~3 phút) rồi chạy. URL: `https://huggingface.co/spaces/<username>/msb-smart-growth-engine`.
-
-## Cách 2 — bỏ file LFS trước khi push (nhẹ hơn, ~30 MB)
-
-App **không dùng** 4 file LFS (`fact_casa_daily` / `fact_transaction` / `fact_digital_activity`
-CSV + `fact_casa_daily.parquet`). Tách nhánh riêng cho HF, gỡ chúng ra:
-
-```bash
-git checkout -b hf-deploy
-git rm --cached data/csv/fact_casa_daily.csv data/csv/fact_transaction.csv \
-                data/csv/fact_digital_activity.csv data/parquet/fact_casa_daily.parquet
-printf '' > .gitattributes            # bỏ tracking LFS
-git commit -am "hf-deploy: gỡ file LFS không cần cho app"
-git remote add hf https://huggingface.co/spaces/<username>/msb-smart-growth-engine
-git push hf hf-deploy:main
-git checkout main                     # quay lại nhánh chính
-```
+> ⚠️ **Space KHÔNG đồng bộ với GitHub.** `git commit` / `git push origin` không làm Space thay đổi.
+> Mỗi lần sửa `streamlit_app/app.py` hoặc dữ liệu đều phải **build lại và upload** như dưới đây.
 
 ---
 
-## Cập nhật app sau này
+## Cách 1: một lệnh (khuyên dùng)
 
-```bash
-git checkout main && git pull
-# ... sửa code / chạy lại pipeline ...
-git push hf main                      # (hoặc: git checkout hf-deploy && git merge main && git push hf hf-deploy:main)
+Lần đầu trên máy:
+
+```powershell
+py -m pip install -U huggingface_hub
+hf auth login          # dán Access Token quyền **Write**: https://huggingface.co/settings/tokens
 ```
 
-## Chỉnh tài nguyên / biến môi trường trên HF
+Mỗi lần cập nhật:
 
-Space → **Settings**:
-- **Variables and secrets** → thêm `APP_MAX_CUST` nếu muốn giới hạn (mặc định 25000 = full).
-- **Hardware**: CPU basic (free, 16 GB) đủ dùng; có thể nâng nếu cần nhanh hơn.
+```powershell
+cd "D:\Tài liệu\Work\code\MSB-Smart-Grow-Engine"
+py stlite/build.py --upload danh30012002/msb-smart-growth-engine
+```
+
+Lệnh này làm hai việc:
+1. Sinh `stlite/site/`, gồm `index.html`, `README.md` (header `sdk: static`),
+   `streamlit_app/app.py`, `data/parquet/*.csv.gz` và `models/*`.
+2. Upload cả thư mục lên Space trong một commit.
+
+Có thể thêm `-m "nội dung commit"`.
+
+## Cách 2: CLI `hf` thủ công
+
+```powershell
+py stlite/build.py
+hf upload danh30012002/msb-smart-growth-engine stlite/site . --repo-type space --commit-message "update"
+```
+
+## Cách 3: git
+
+```powershell
+git lfs install
+git clone https://huggingface.co/spaces/danh30012002/msb-smart-growth-engine $env:TEMP\msb-space
+Copy-Item "D:\Tài liệu\Work\code\MSB-Smart-Grow-Engine\stlite\site\*" $env:TEMP\msb-space -Recurse -Force
+cd $env:TEMP\msb-space
+git add -A; git commit -m "update"; git push     # user = danh30012002, password = Access Token
+```
+
+Hugging Face từ chối file nhị phân (`.csv.gz`) không đi qua LFS/Xet. Nếu push báo
+*"contains binary files"*, dùng Cách 1 hoặc Cách 2.
+
+---
+
+## Kiểm tra sau khi deploy
+
+- Xem commit mới nhất ở tab **Files → History** của Space; Space build lại trong khoảng 30 giây.
+- Tra nhanh qua API (trường `lastModified`): https://huggingface.co/api/spaces/danh30012002/msb-smart-growth-engine
+- Nếu vẫn thấy giao diện cũ, nhấn **Ctrl+Shift+R** (trình duyệt đang giữ `app.py` cũ).
 
 ## Lỗi thường gặp
 
 | Triệu chứng | Xử lý |
 |---|---|
-| Build fail ở `pip install` | Xem log; thường do pin version — sửa `requirements.txt` rồi push lại |
-| "This app has gone over its resource limits" | Hiếm trên HF (16GB). Nếu có: Space Settings → Variables → `APP_MAX_CUST=15000` |
-| Trang sản phẩm trống | Reboot Space (Settings → Factory reboot) để xoá cache `@st.cache_data` |
-| `git push hf` bị 403 | Dùng Access Token (quyền write) làm password, không phải mật khẩu tài khoản |
+| `401` / `403` khi upload | Token chưa có quyền Write, hoặc chưa đăng nhập: chạy `hf auth login` |
+| `hf` không nhận lệnh | `py -m pip install -U huggingface_hub`, mở lại terminal |
+| `pip` / `py` treo không in gì (Python 3.12 trên Windows, thường do WMI) | Dùng **Cách 3 (git)**: chỉ cần `py stlite/build.py` + git, không cần `huggingface_hub` |
+| Commit GitHub xong nhưng Space không đổi | Đúng như thiết kế: chạy `py stlite/build.py --upload ...` |
+| Loading mãi không xong | F12 → Console. Thường do mạng/CDN (trang tự tải lại 2 lần); lỗi package → sửa `REQUIREMENTS` trong `stlite/build.py` |
+| App báo lỗi Python | Chạy `streamlit run streamlit_app/app.py` trên máy để tìm lỗi. stlite dùng Streamlit 1.50 + pandas 2.2, không có pyarrow |
+| `short_description` bị từ chối | Hugging Face giới hạn ≤ 60 ký tự (sửa `SPACE_README` trong `stlite/build.py`) |
+
+## Chạy thử site tĩnh trước khi upload
+
+```powershell
+py stlite/build.py
+cd stlite/site; py -m http.server 8000     # mở http://localhost:8000
+```
+
+---
+
+## Phương án khác: Streamlit Community Cloud
+
+Trỏ tới `streamlit_app/app.py` và `streamlit_app/requirements.txt`. RAM chỉ khoảng 1 GB, nên đặt
+`APP_MAX_CUST=10000` trong **Settings → Secrets** để app lấy mẫu khách hàng.

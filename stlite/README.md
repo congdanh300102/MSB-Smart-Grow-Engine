@@ -45,14 +45,14 @@ Space build ~30 giây (chỉ là static files). Mở:
 
 Lần đầu tải ~55MB (Pyodide + pandas/pyarrow/plotly + data) → 30–90 giây. Sau đó nhanh.
 
-## 4. Cập nhật sau này
+## 4. Cập nhật sau này (một lệnh)
 
 ```bash
-py stlite/build.py
-cd /tmp/msb-space
-cp -r "d:/.../stlite/site/." .
-git add -A && git commit -m "update" && git push
+py -m pip install -U huggingface_hub && hf auth login     # lần đầu
+py stlite/build.py --upload danh30012002/msb-smart-growth-engine -m "update"
 ```
+
+`git push` lên GitHub **không** cập nhật Space. Xem thêm [../HUGGINGFACE.md](../HUGGINGFACE.md).
 
 ## Lỗi thường gặp
 
