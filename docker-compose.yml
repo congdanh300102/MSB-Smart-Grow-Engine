@@ -1,4 +1,15 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: msb_sge_app
+    restart: unless-stopped
+    environment:
+      APP_MAX_CUST: "25000"
+    ports:
+      - "8501:8501"
+
   db:
     image: postgres:16-alpine
     container_name: msb_sge_db

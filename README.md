@@ -254,6 +254,16 @@ Demo: https://huggingface.co/spaces/danh30012002/msb-smart-growth-engine
 Trỏ tới `streamlit_app/app.py` và dùng `streamlit_app/requirements.txt`. Đặt `APP_MAX_CUST=10000`
 trong Secrets để tránh lỗi hết RAM.
 
+### GreenNode Cloud (server thật — Docker)
+
+App **gốc** (không phải bản stlite) chạy trên server thật, không cần lách RAM: `Dockerfile` +
+`docker-compose.yml` (service `app`) ở gốc repo. Build/chạy cục bộ:
+```bash
+docker build -t msb-sge-app:local . && docker run -d -p 8501:8501 msb-sge-app:local
+```
+Hướng dẫn deploy lên vServer/VKS của GreenNode (và manifest Kubernetes mẫu ở `k8s/`):
+[GREENNODE.md](GREENNODE.md).
+
 ---
 
 ## 6. Cấu trúc thư mục

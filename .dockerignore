@@ -1,0 +1,12 @@
+.git
+.gitattributes
+.venv
+__pycache__
+*.pyc
+data/csv
+stlite/site
+*.docx
+*.xlsx
+sql
+requirements-dev.txt
+HUGGINGFACE.md

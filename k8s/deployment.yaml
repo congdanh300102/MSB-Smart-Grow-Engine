@@ -1,0 +1,60 @@
+# Manifest mẫu để deploy lên VKS (GreenNode Kubernetes Service).
+# 1. Sửa `image:` bên dưới thành registry thật của bạn (vCR) sau khi `docker push`.
+# 2. kubectl apply -f k8s/deployment.yaml
+# 3. kubectl get svc msb-sge-app   (lấy EXTERNAL-IP nếu LoadBalancer được GreenNode hỗ trợ;
+#    nếu không, dùng Ingress hoặc đổi type sang NodePort)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: msb-sge-app
+  labels:
+    app: msb-sge-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: msb-sge-app
+  template:
+    metadata:
+      labels:
+        app: msb-sge-app
+    spec:
+      containers:
+        - name: app
+          image: <registry-host-cua-ban>/msb-sge-app:latest   # <-- sửa dòng này
+          ports:
+            - containerPort: 8501
+          env:
+            - name: APP_MAX_CUST
+              value: "25000"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 20
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: msb-sge-app
+spec:
+  selector:
+    app: msb-sge-app
+  ports:
+    - port: 80
+      targetPort: 8501
+  type: LoadBalancer   # đổi sang NodePort nếu GreenNode VKS chưa cấp LoadBalancer
