@@ -45,6 +45,10 @@ ssh ubuntu@<IP_VM>     # user tuỳ image GreenNode cung cấp (ubuntu/root...)
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER && newgrp docker
 docker --version
+
+# Ubuntu tối giản không có sẵn git — cài trước khi clone
+sudo apt-get update && sudo apt-get install -y git
+git --version
 ```
 
 ## 3. Đưa code lên VM

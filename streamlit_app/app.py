@@ -510,11 +510,12 @@ def render_period_plan(comp):
             .groupby("product_code").agg(eligible=("eligible_customers", "sum"),
                                          sum_prop=("sp", "sum")).reset_index())
     cp = comp.set_index("product_code")
-    p_old = base.product_code.map(cp.avg_propensity)
-    p_new = np.where(base.product_code.map(cp.lr_blended).astype(bool),
-                     w_new * base.product_code.map(cp.avg_anchor_lr)
-                     + (1 - w_new) * base.product_code.map(cp.avg_fit_score),
-                     base.product_code.map(cp.avg_fit_score))
+    codes = base.product_code.astype(str)  # tránh Categorical.map() trả về Categorical (float) khi giá trị map là duy nhất
+    p_old = codes.map(cp.avg_propensity)
+    p_new = np.where(codes.map(cp.lr_blended).astype(bool),
+                     w_new * codes.map(cp.avg_anchor_lr)
+                     + (1 - w_new) * codes.map(cp.avg_fit_score),
+                     codes.map(cp.avg_fit_score))
     base["p_old"] = p_old.values
     base["p_new"] = p_new
     base["sum_prop_new"] = base.sum_prop * np.where(p_old > 0, p_new / p_old, 1.0)
