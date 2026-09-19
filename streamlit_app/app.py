@@ -1029,7 +1029,8 @@ elif PAGE.startswith("👤"):
         best_sid = sc.sort_values("smart_growth_score").iloc[-1]["score_id"]
         _reason = get_df("ai_score_reason")
         rs = _reason[_reason.score_id == best_sid].sort_values("contribution_score").copy()
-        rs["feat"] = rs.feature_name.map(FEATURE_LABEL).fillna(rs.feature_name)
+        _fname = rs.feature_name.astype(str)
+        rs["feat"] = _fname.map(FEATURE_LABEL).fillna(_fname)
         fig = px.bar(rs, x="contribution_score", y="feat", orientation="h",
                      color="impact_direction",
                      color_discrete_map={"POSITIVE": MSB_RED, "NEGATIVE": "#5B6770"})
@@ -1258,7 +1259,8 @@ elif PAGE.startswith("🤖"):
         prod_sel = st.selectbox("Sản phẩm", COEF.product_id.unique(),
                                 format_func=lambda p: PID_NAME.get(p, p))
         cf = COEF[COEF.product_id == prod_sel].copy()
-        cf["feat"] = cf.feature_name.map(FEATURE_LABEL).fillna(cf.feature_name)
+        _cfname = cf.feature_name.astype(str)
+        cf["feat"] = _cfname.map(FEATURE_LABEL).fillna(_cfname)
         cf = cf[cf.feature_name != "intercept"].sort_values("coefficient")
         fig = px.bar(cf, x="coefficient", y="feat", orientation="h",
                      color="coefficient", color_continuous_scale="RdBu_r")
