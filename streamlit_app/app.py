@@ -1366,7 +1366,7 @@ elif PAGE.startswith("🛍️"):
 
     # ---- Phân khúc × Sản phẩm --------------------------------------
     with tab3:
-        aff = PAFF.set_index(PAFF.columns[0]) if PAFF.columns[0] != "product_code" else PAFF.set_index("product_code")
+        aff = PAFF.set_index("product_code") if "product_code" in PAFF.columns else PAFF.copy()
         aff = aff.select_dtypes("number")
         aff.index = aff.index.astype(str)
         affl = aff.reset_index(names="product_code")
