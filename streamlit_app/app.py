@@ -625,15 +625,15 @@ def render_period_plan(comp):
 st.sidebar.markdown(f"### <span style='color:{MSB_RED}'>◤ MSB</span> Smart Growth Engine",
                     unsafe_allow_html=True)
 st.sidebar.caption("AI Evaluation Dashboard · Synthetic / Masked")
-PAGE = st.sidebar.radio("Điều hướng", [
-    "🏠 Giới thiệu & Mục đích",
-    "🧭 Hành trình AI — 12 Actions",
-    "🎯 RM Opportunity Desk",
+PAGE = st.sidebar.radio("Navigation", [
+    "🏠 Overview & Purpose",
+    "🧭 AI Journey — 12 Actions",
     "👤 Customer 360",
-    "🛍️ Sản phẩm & Nhu cầu",
-    "🔁 AI Agent · Feedback & Hiệu chỉnh",
+    "🎯 RM Opportunity Desk",
+    "🛍️ Products & Needs",
+    "🔁 AI Agent · Feedback & Tuning",
     "📊 Manager Intelligence",
-    "🤖 Mô hình Propensity",
+    "🤖 Propensity Model",
 ])
 st.sidebar.divider()
 st.sidebar.metric("Khách hàng trong app", f"{N_CUST:,}")
@@ -740,8 +740,11 @@ digraph {
 # PAGE 2 — 12 ACTIONS
 # ==========================================================================
 elif PAGE.startswith("🧭"):
-    st.title("Hành trình AI — 12 Actions")
+    st.title("AI Journey — 12 Actions")
     st.caption("Mỗi bước gắn với dữ liệu / model thật trong công cụ.")
+    st.info("**Mục đích:** Xây dựng luồng hành trình của khách hàng — RM thiết lập và quản lý "
+            "các trọng số để phục vụ kiểm soát kế hoạch kinh doanh phù hợp với mô hình kinh "
+            "doanh tại mỗi thời kỳ.")
 
     best = SCORE.sort_values("smart_growth_score").groupby("customer_id").tail(1)
 
@@ -1186,7 +1189,7 @@ elif PAGE.startswith("📊"):
 # PAGE 6 — MODEL
 # ==========================================================================
 elif PAGE.startswith("🤖"):
-    st.title("Mô hình Propensity — Hybrid (Logistic Regression + Rule fit)")
+    st.title("Propensity Model — Hybrid (Logistic Regression + Rule fit)")
     n_lr = int(PCOMP.lr_blended.sum()) if PCOMP is not None else 27
     n_rule = len(PCOMP) - n_lr if PCOMP is not None else 8
     st.markdown(
@@ -1297,7 +1300,7 @@ elif PAGE.startswith("🤖"):
 # PAGE 5b — SẢN PHẨM & NHU CẦU
 # ==========================================================================
 elif PAGE.startswith("🛍️"):
-    st.title("Sản phẩm & Nhu cầu — Khách hàng phù hợp với sản phẩm nào?")
+    st.title("Products & Needs — Which products fit which customers?")
     st.caption("Danh mục 35 sản phẩm chuẩn hoá từ MSB_products_description.xlsx (958 mã). "
                "Propensity = hybrid Logistic Regression (nhóm neo) + rule fit theo "
                "'Khách hàng/Nhu cầu phù hợp'.")
@@ -1308,8 +1311,8 @@ elif PAGE.startswith("🛍️"):
                    "→ Chạy `py src/product_analysis.py`, hoặc trên Streamlit Cloud: **⋮ → Reboot app**.")
         st.stop()
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📋 Danh mục", "📈 Dự báo cầu", "🔥 Phân khúc × Sản phẩm", "👤 Gợi ý theo khách hàng"])
+    tab1, tab2, tab3 = st.tabs([
+        "📋 Danh mục", "📈 Dự báo cầu", "🔥 Phân khúc × Sản phẩm"])
 
     # ---- Danh mục -----------------------------------------------------
     with tab1:
@@ -1321,11 +1324,9 @@ elif PAGE.startswith("🛍️"):
                                            "subgroup", "product_tier", "customer_type",
                                            "target_need", "base_propensity"]],
             use_container_width=True, hide_index=True, height=520)
-        k1, k2, k3 = st.columns(3)
+        k1, k2 = st.columns(2)
         k1.metric("Sản phẩm chuẩn hoá", len(c))
-        if PHOLD is not None:
-            k2.metric("SP đang sở hữu / khách (TB)", f"{len(PHOLD)/MART.customer_id.nunique():.1f}")
-        k3.metric("Đề xuất/khách (top-6)", f"{len(PRECO)/PRECO.customer_id.nunique():.1f}")
+        k2.metric("Đề xuất/khách (top-6)", f"{len(PRECO)/PRECO.customer_id.nunique():.1f}")
 
     # ---- Dự báo cầu -------------------------------------------------
     with tab2:
@@ -1395,39 +1396,12 @@ elif PAGE.startswith("🛍️"):
                               coloraxis_colorbar=dict(thickness=14, len=0.8, tickformat=".0%"))
             st.plotly_chart(fig, width="stretch")
 
-    # ---- Gợi ý theo khách hàng ------------------------------------
-    with tab4:
-        cid = st.selectbox("Khách hàng", PRECO.customer_id.drop_duplicates().head(800))
-        r = PRECO[PRECO.customer_id == cid].sort_values("priority_rank")
-        m = MART[MART.customer_id == cid]
-        if not m.empty:
-            mm = m.iloc[0]
-            cc = st.columns(4)
-            cc[0].metric("Phân khúc", str(mm.get("segment", "")))
-            cc[1].metric("Số dư ~", f"{mm.get('avg_balance_90d', 0)/1e6:,.0f}tr")
-            cc[2].metric("SP đang sở hữu",
-                         int((PHOLD.customer_id == cid).sum()) if PHOLD is not None else "—")
-            cc[3].metric("Digital score", f"{mm.get('digital_engagement_score', 0):.0f}")
-        for _, row in r.iterrows():
-            reasons = " · ".join([x for x in (row.reason_1, row.reason_2, row.reason_3) if isinstance(x, str)])
-            st.markdown(
-                f"**#{int(row.priority_rank)} — {row['product_name']}**  "
-                f"<span class='msb-badge'>{row.priority_level}</span>  \n"
-                f"Propensity **{row.propensity:.0%}** · fit {row.fit_score:.0%} · "
-                f"SGS {row.smart_growth_score:.0f} · kỳ vọng chuyển đổi {row.expected_conversion:.0%}  \n"
-                f"<span style='color:#5B6770'>Lý do: {reasons}</span>",
-                unsafe_allow_html=True)
-        st.divider()
-        st.dataframe(r[["priority_rank", "product_code", "product_group", "propensity",
-                        "fit_score", "smart_growth_score", "expected_conversion"]],
-                     use_container_width=True, hide_index=True)
-
 
 # ==========================================================================
 # PAGE 5c — AI AGENT · FEEDBACK & HIỆU CHỈNH  (Action 11–12)
 # ==========================================================================
 elif PAGE.startswith("🔁"):
-    st.title("AI Agent — RM Feedback & Hiệu chỉnh mô hình")
+    st.title("AI Agent — RM Feedback & Model Tuning")
     st.caption("Action 11–12 của hành trình AI: RM phản hồi với đề xuất → agent **xem xét lại "
                "mô hình**, **giải thích**, phân biệt \"AI sai thật\" vs \"RM thận trọng\", rồi "
                "**hiệu chỉnh rule/gate** khi sai thật → chấm lại điểm.")
