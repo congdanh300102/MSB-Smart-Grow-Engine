@@ -734,14 +734,6 @@ digraph {
 """)
 
     st.divider()
-    st.subheader("Sản phẩm giai đoạn đầu & mô hình dữ liệu")
-    for grp, pid in TARGET_PRODUCTS.items():
-        with st.expander(GROUP_LABEL[grp]):
-            st.markdown(f"- {PID_NAME[pid]}")
-    st.caption("Data model: 27 bảng PostgreSQL (dim / fact / aggregate / feature mart / "
-               "AI feature / model output / recommendation / feedback / training) + 2 view "
-               "(eligibility gate, top-20). Chi tiết: `sql/01_schema.sql`, `README.md`.")
-
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Khách hàng", f"{N_CUST:,}")
     m2.metric("Dòng feature mart", f"{len(MART):,}")
