@@ -1032,14 +1032,10 @@ elif PAGE.startswith("👤"):
             product_name=rc.recommended_product_id.map(PID_NAME))
         for _, x in _rows.iterrows():
             tag = "🔴" if x.priority_rank == 1 else "▫️"
-            reasons = " · ".join(str(x[c]) for c in ("reason_1", "reason_2", "reason_3")
-                                 if c in x.index and isinstance(x[c], str))
             st.markdown(f"{tag} **#{int(x.priority_rank)} {x.get('product_name','')}** — "
                         f"{x.recommended_action} · {x.recommended_channel} · {x.recommended_timing}")
-            st.caption(f"{x.get('message_angle','')}  \n"
-                       f"*Propensity {x.get('propensity', x.get('expected_conversion',0))*100:.0f}% · "
-                       f"Expected conversion {x.expected_conversion*100:.0f}% · status {x.get('status','')}*"
-                       + (f"  \nLý do: {reasons}" if reasons else ""))
+            st.caption(f"*Propensity {x.get('propensity', x.get('expected_conversion',0))*100:.0f}% · "
+                       f"Expected conversion {x.expected_conversion*100:.0f}% · status {x.get('status','')}*")
 
         st.subheader("Why this customer  (đóng góp logit theo feature)")
         best_sid = sc.sort_values("smart_growth_score").iloc[-1]["score_id"]
@@ -1120,9 +1116,6 @@ elif PAGE.startswith("💬"):
                 f"propensity {x.get('propensity', x.get('expected_conversion', 0)) * 100:.0f}%"
                 + (f", lý do: {reasons}" if reasons else ""))
     context_text = "\n".join(ctx)
-
-    with st.expander("Dữ liệu đang dùng làm ngữ cảnh cho chatbot"):
-        st.code(context_text)
 
     system_prompt = (
         "Bạn là trợ lý AI của MSB, hỗ trợ RM giải đáp thắc mắc của khách hàng về chỉ số tài chính, "
