@@ -7,6 +7,9 @@ services:
     restart: unless-stopped
     environment:
       APP_MAX_CUST: "25000"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-}"
     ports:
       - "8501:8501"
 

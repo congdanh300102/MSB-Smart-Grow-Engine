@@ -310,6 +310,17 @@ def fmt_vnd(x):
     return f"{x:,.0f}"
 
 
+def _secret(key):
+    """os.environ trước, rồi st.secrets nếu có (không lỗi khi thiếu secrets.toml)."""
+    v = os.environ.get(key)
+    if v:
+        return v
+    try:
+        return st.secrets.get(key)
+    except Exception:
+        return None
+
+
 def _fold(s):
     """Chuẩn hoá chuỗi để tìm kiếm: bỏ dấu tiếng Việt, không phân biệt hoa thường."""
     s = unicodedata.normalize("NFD", str(s).replace("đ", "d").replace("Đ", "D"))
@@ -629,6 +640,7 @@ PAGE = st.sidebar.radio("Navigation", [
     "🏠 Overview & Purpose",
     "🧭 AI Journey — 12 Actions",
     "👤 Customer 360",
+    "💬 Customer Assistant",
     "🎯 RM Opportunity Desk",
     "🛍️ Products & Needs",
     "🔁 AI Agent · Feedback & Tuning",
@@ -1042,6 +1054,110 @@ elif PAGE.startswith("👤"):
 
     with st.expander("Toàn bộ feature Customer 360"):
         st.dataframe(pd.DataFrame({"feature": row.index.astype(str), "giá trị": row.astype(str).values}), use_container_width=True, height=500, hide_index=True)
+
+
+# ==========================================================================
+# PAGE 4b — CUSTOMER ASSISTANT (CHATBOT)
+# ==========================================================================
+elif PAGE.startswith("💬"):
+    st.title("Customer Assistant — Chatbot hỏi đáp")
+    st.caption("RM chọn khách hàng rồi hỏi chatbot về chỉ số, thống kê và sản phẩm phù hợp — "
+               "trả lời dựa trên dữ liệu Customer 360 / AI Score / khuyến nghị sản phẩm đang có "
+               "trong app (không tự suy đoán số liệu).")
+
+    api_key = _secret("OPENAI_API_KEY")
+    if not api_key:
+        st.warning("Chưa cấu hình `OPENAI_API_KEY` (biến môi trường hoặc `st.secrets`).\n\n"
+                   "Nếu dùng GreenNode Model-as-a-Service (MaaS): đặt `OPENAI_API_KEY` = API key "
+                   "GreenNode cấp, và `OPENAI_BASE_URL` = endpoint MaaS (dạng OpenAI-compatible). "
+                   "Có thể chỉnh tên model qua `OPENAI_MODEL`.")
+        st.stop()
+
+    base_url = _secret("OPENAI_BASE_URL") or None
+    model = _secret("OPENAI_MODEL") or "gpt-4o-mini"
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        st.error("Thiếu thư viện `openai` — thêm vào requirements.txt rồi cài lại (`pip install -r requirements.txt`).")
+        st.stop()
+
+    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+
+    _src = PRECO if PRECO is not None else MART
+    default_list = _src.customer_id.drop_duplicates().head(300).tolist()
+    cid = st.selectbox("Chọn khách hàng", default_list
+                       + [c for c in MART.customer_id.head(300) if c not in default_list],
+                       key="chat_cid")
+
+    row = MART[MART.customer_id == cid].iloc[0]
+    prof = CUST[CUST.customer_id == cid].iloc[0]
+    prc = (PRECO[PRECO.customer_id == cid].sort_values("priority_rank").head(6)
+           if PRECO is not None else pd.DataFrame())
+    owned = (PHOLD[(PHOLD.customer_id == cid) & (PHOLD.status == "ACTIVE")]
+             if PHOLD is not None else pd.DataFrame())
+    owned_names = [PID_NAME.get(p, p) for p in owned.product_id] if not owned.empty else []
+
+    ctx = [
+        f"- Mã khách hàng: {cid}",
+        f"- Phân khúc: {prof.customer_segment}",
+        f"- Thâm niên quan hệ: {prof.relationship_years:.1f} năm",
+        f"- Số dư CASA bình quân 90 ngày: {fmt_vnd(row.avg_balance_90d)}",
+        f"- Chi tiêu 30 ngày: {fmt_vnd(row.spending_30d)}",
+        f"- Digital engagement score: {row.digital_engagement_score:.0f}/100",
+        f"- Số sản phẩm đang dùng: {int(row.product_count)}",
+        f"- Sản phẩm đang sở hữu: {', '.join(owned_names) if owned_names else '(không có dữ liệu)'}",
+    ]
+    if not prc.empty:
+        ctx.append("- Top sản phẩm phù hợp tiếp theo (thứ hạng, Smart Growth Score, propensity, lý do):")
+        for _, x in prc.iterrows():
+            reasons = " · ".join(str(x[c]) for c in ("reason_1", "reason_2", "reason_3")
+                                 if c in x.index and isinstance(x[c], str))
+            ctx.append(
+                f"  {int(x.priority_rank)}. {x.get('product_name','')} — "
+                f"SGS {x.get('smart_growth_score', 0):.0f}, "
+                f"propensity {x.get('propensity', x.get('expected_conversion', 0)) * 100:.0f}%"
+                + (f", lý do: {reasons}" if reasons else ""))
+    context_text = "\n".join(ctx)
+
+    with st.expander("Dữ liệu đang dùng làm ngữ cảnh cho chatbot"):
+        st.code(context_text)
+
+    system_prompt = (
+        "Bạn là trợ lý AI của MSB, hỗ trợ RM giải đáp thắc mắc của khách hàng về chỉ số tài chính, "
+        "thống kê hành vi và các sản phẩm MSB phù hợp — CHỈ dựa trên dữ liệu khách hàng dưới đây, "
+        "không suy đoán số liệu không có trong dữ liệu. Nếu câu hỏi nằm ngoài phạm vi chỉ số/thống kê/"
+        "sản phẩm phù hợp của khách hàng này, lịch sự từ chối và hướng người hỏi quay lại chủ đề. "
+        "Trả lời ngắn gọn, rõ ràng, bằng tiếng Việt.\n\n"
+        f"DỮ LIỆU KHÁCH HÀNG {cid}:\n{context_text}"
+    )
+
+    hist_key = f"chat_hist__{cid}"
+    st.session_state.setdefault(hist_key, [])
+
+    for m in st.session_state[hist_key]:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    if prompt := st.chat_input("Hỏi về chỉ số, thống kê hoặc sản phẩm phù hợp của khách hàng này…"):
+        st.session_state[hist_key].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Đang trả lời…"):
+                try:
+                    messages = [{"role": "system", "content": system_prompt}] + st.session_state[hist_key][-10:]
+                    resp = client.chat.completions.create(model=model, messages=messages,
+                                                           temperature=0.3, max_tokens=600)
+                    answer = resp.choices[0].message.content
+                except Exception as e:
+                    answer = f"Lỗi khi gọi API: {e}"
+            st.markdown(answer)
+        st.session_state[hist_key].append({"role": "assistant", "content": answer})
+
+    if st.session_state[hist_key]:
+        st.button("Xoá hội thoại", key="chat_clear",
+                 on_click=lambda: st.session_state.pop(hist_key, None))
 
 
 # ==========================================================================

@@ -67,10 +67,17 @@ git lfs install && git lfs pull   # nếu muốn cả data/csv gốc — app kh�
 
 ```bash
 docker build -t msb-sge-app:latest .
-docker run -d --name msb_sge_app --restart unless-stopped -p 80:8501 msb-sge-app:latest
+docker run -d --name msb_sge_app --restart unless-stopped -p 80:8501 \
+  -e OPENAI_API_KEY="<api-key-cua-ban>" \
+  -e OPENAI_BASE_URL="<endpoint-MaaS-neu-dung-GreenNode-hoac-bo-trong-neu-dung-OpenAI>" \
+  -e OPENAI_MODEL="<ten-model>" \
+  msb-sge-app:latest
 ```
 
-Hoặc dùng compose (kèm cả Postgres nếu muốn):
+(3 biến `OPENAI_*` chỉ cần nếu dùng trang **Customer Assistant** (chatbot) — bỏ qua nếu không dùng trang này.)
+
+Hoặc dùng compose (kèm cả Postgres nếu muốn) — tạo file `.env` cạnh `docker-compose.yml` với
+`OPENAI_API_KEY=...` / `OPENAI_BASE_URL=...` / `OPENAI_MODEL=...` rồi:
 ```bash
 docker compose up -d app
 ```
@@ -129,6 +136,9 @@ docker run -d --name msb_sge_app --restart unless-stopped -p 80:8501 msb-sge-app
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `APP_MAX_CUST` | `25000` | Số khách hàng nạp vào app (server thật → để nguyên 25000, đủ RAM) |
+| `OPENAI_API_KEY` | *(không đặt = trang chatbot tắt)* | API key cho trang **Customer Assistant**. Dùng OpenAI API key hoặc API key do GreenNode MaaS cấp |
+| `OPENAI_BASE_URL` | *(trống = OpenAI chính thức)* | Đặt thành endpoint GreenNode Model-as-a-Service (MaaS) nếu dùng MaaS thay vì OpenAI trực tiếp — cần dạng OpenAI-compatible (`/v1/chat/completions`) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Tên/ID model — đổi theo model GreenNode MaaS cung cấp nếu dùng MaaS |
 
 ## Xử lý sự cố
 
