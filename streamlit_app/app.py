@@ -734,6 +734,17 @@ digraph {
 """)
 
     st.divider()
+    st.subheader("Sản phẩm đang sử dụng")
+    if CAT is not None:
+        _glab = {"CARD": "Thẻ", "CASA": "Tài khoản", "FD": "Tiền gửi", "LENDING": "Cho vay"}
+        for grp in ["CARD", "CASA", "FD", "LENDING"]:
+            sub = CAT[CAT.product_group == grp].sort_values("product_name")
+            if sub.empty:
+                continue
+            with st.expander(f"{_glab.get(grp, grp)} ({len(sub)} sản phẩm)"):
+                for _, r in sub.iterrows():
+                    st.markdown(f"- {r.product_name}")
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Khách hàng", f"{N_CUST:,}")
     m2.metric("Dòng feature mart", f"{len(MART):,}")
