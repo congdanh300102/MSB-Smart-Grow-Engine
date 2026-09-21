@@ -335,6 +335,65 @@ def _id(code):
     return BY_CODE[code]["product_id"]
 
 
+# ------------------------------------------------------------------ ưu tiên kinh doanh + mùa vụ
+# models/priority_config.json — RM/Manager tự hiệu chỉnh (trang Streamlit "AI Agent · Feedback
+# & Tuning" → tab "Ưu tiên kinh doanh & Mùa vụ"). Hệ số nhân trực tiếp vào PROPENSITY ở
+# product_analysis.py::build() — KHÔNG đổi fit_score/eligibility (tránh việc hệ số kinh doanh
+# "mở khoá" khách vốn không đủ điều kiện sản phẩm). Tách biệt với rule_overrides.json (đó là
+# AI Feedback Agent SỬA LỖI mô hình; đây là RM/Manager CHỦ ĐỘNG định hướng theo mùa vụ/chiến lược).
+_PRIO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "models", "priority_config.json")
+
+QUARTERS = ["Q1", "Q2", "Q3", "Q4"]
+
+# Hệ số minh hoạ (dữ liệu synthetic không có tín hiệu mùa vụ thật để học từ đó) — Q1 sau Tết:
+# FD/LENDING nhích lên (trả nợ/gửi tiết kiệm đầu năm); Q2-Q3 mùa du lịch/hè: CARD tăng; Q4 mua
+# sắm cuối năm + sắm Tết: CARD tăng mạnh nhất, LENDING tiêu dùng tăng, FD giảm nhẹ.
+DEFAULT_SEASONAL_MULTIPLIER = {
+    "Q1": {"CARD": 0.95, "CASA": 1.00, "FD": 1.05, "LENDING": 1.05},
+    "Q2": {"CARD": 1.05, "CASA": 1.00, "FD": 1.00, "LENDING": 1.00},
+    "Q3": {"CARD": 1.10, "CASA": 1.00, "FD": 0.95, "LENDING": 1.00},
+    "Q4": {"CARD": 1.15, "CASA": 1.00, "FD": 0.95, "LENDING": 1.10},
+}
+
+
+def _default_priority_config() -> dict:
+    return {
+        "seasonal_multiplier": {q: dict(v) for q, v in DEFAULT_SEASONAL_MULTIPLIER.items()},
+        "product_priority_multiplier": {p["product_code"]: 1.0 for p in CATALOGUE},
+        "note": "Hệ số minh hoạ — RM/Manager tự hiệu chỉnh theo mùa vụ thực tế & ưu tiên kinh doanh.",
+        "updated_by": None,
+        "updated_date": None,
+    }
+
+
+def load_priority_config() -> dict:
+    """os.environ/file trước, fallback hệ số minh hoạ mặc định nếu chưa có/lỗi file."""
+    cfg = _default_priority_config()
+    try:
+        with open(_PRIO_PATH, encoding="utf-8") as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        return cfg
+    for q, v in saved.get("seasonal_multiplier", {}).items():
+        cfg["seasonal_multiplier"].setdefault(q, {}).update(v)
+    cfg["product_priority_multiplier"].update(saved.get("product_priority_multiplier", {}))
+    cfg["note"] = saved.get("note", cfg["note"])
+    cfg["updated_by"] = saved.get("updated_by")
+    cfg["updated_date"] = saved.get("updated_date")
+    return cfg
+
+
+def save_priority_config(cfg: dict) -> None:
+    os.makedirs(os.path.dirname(_PRIO_PATH), exist_ok=True)
+    with open(_PRIO_PATH, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, ensure_ascii=False, indent=2)
+
+
+def quarter_of(d) -> str:
+    return f"Q{(d.month - 1) // 3 + 1}"
+
+
 # ------------------------------------------------------------------ dim_product
 def dim_product_frame() -> pd.DataFrame:
     return pd.DataFrame([{

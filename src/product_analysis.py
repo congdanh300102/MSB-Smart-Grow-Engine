@@ -105,7 +105,21 @@ def build(seed=42):
     w = np.where(is_lr, w, 0.0)
     prop = w * a + (1 - w) * fit.fit_score.values
     prop = np.clip(prop + rng.normal(0, 0.02, len(fit)), 0.01, 0.99)
+
+    # ---- hệ số mùa vụ (theo quý của AS_OF) + ưu tiên kinh doanh (RM/Manager cấu hình) ----
+    # Chỉ nhân vào propensity (ảnh hưởng thứ hạng đề xuất/dự báo cầu) — KHÔNG đổi fit_score/
+    # eligibility ở products.fit_table(), để tránh việc hệ số kinh doanh "mở khoá" khách vốn
+    # không đủ điều kiện sản phẩm. Cấu hình: models/priority_config.json (mặc định = 1.0 mọi nơi
+    # nếu chưa hiệu chỉnh -> không đổi hành vi cũ).
+    prio_cfg = P.load_priority_config()
+    quarter = P.quarter_of(AS_OF)
+    seas = prio_cfg["seasonal_multiplier"].get(quarter, {})
+    seas_mult = fit.product_group.map(seas).fillna(1.0).to_numpy(dtype=float)
+    prio_mult = fit.product_code.map(prio_cfg["product_priority_multiplier"]).fillna(1.0).to_numpy(dtype=float)
+    prop = np.clip(prop * seas_mult * prio_mult, 0.01, 0.99)
     fit["propensity"] = np.round(prop, 4)
+    fit["seasonal_multiplier"] = seas_mult
+    fit["priority_multiplier"] = prio_mult
 
     cv = fit.customer_value_score.fillna(50).values
     eng = fit.engagement_score.fillna(50).values
@@ -119,6 +133,7 @@ def build(seed=42):
 
     keep = ["customer_id", "product_id", "product_code", "product_group", "eligible", "held",
             "fit_score", "propensity", "smart_growth_score", "priority_level",
+            "seasonal_multiplier", "priority_multiplier",
             "reason_1", "reason_2", "reason_3"]
     ai_fit = fit[keep].copy()
     ai_fit.to_parquet(os.path.join(PARQUET, "ai_product_fit.parquet"), index=False)
@@ -213,13 +228,13 @@ def build(seed=42):
     aff.to_parquet(os.path.join(PARQUET, "agg_segment_product_affinity.parquet"))
     aff.to_csv(os.path.join(CSV, "agg_segment_product_affinity.csv"))
 
-    _report(dimp, fit, reco, dem, hold, mart)
+    _report(dimp, fit, reco, dem, hold, mart, quarter, prio_cfg)
     print(f"OK  {len(P.CATALOGUE)} sản phẩm | {mart.customer_id.nunique():,} khách | "
           f"ai_product_fit {len(ai_fit):,} dòng | recommendation {len(reco):,} dòng")
     return ai_fit, reco, dem
 
 
-def _report(dimp, fit, reco, dem, hold, mart):
+def _report(dimp, fit, reco, dem, hold, mart, quarter, prio_cfg):
     os.makedirs(MODELS, exist_ok=True)
     n = mart.customer_id.nunique()
     top_prod = (reco[reco.priority_rank == 1].groupby("product_code").size()
@@ -280,7 +295,30 @@ def _report(dimp, fit, reco, dem, hold, mart):
         grp_gap.groupby("product_group").customer_id.nunique().sort_values(ascending=False).items()) + ".")
     L.append(f"- Tổng cơ hội (khách × sản phẩm, propensity ≥ 0.6): {len(gap):,}.")
     L.append("")
-    L.append("## 6. Cách dùng\n")
+    L.append("## 6. Hệ số mùa vụ & ưu tiên kinh doanh đang áp dụng\n")
+    L.append(f"*Quý áp dụng: **{quarter}** (theo AS_OF {AS_OF}) · nguồn: `models/priority_config.json`"
+             + (f" · cập nhật lần cuối {prio_cfg['updated_date']} bởi {prio_cfg.get('updated_by') or '—'}"
+                if prio_cfg.get("updated_date") else " (chưa hiệu chỉnh — dùng hệ số minh hoạ mặc định)")
+             + "*\n")
+    seas_q = prio_cfg["seasonal_multiplier"].get(quarter, {})
+    L.append("| Nhóm sản phẩm | Hệ số mùa vụ (" + quarter + ") |")
+    L.append("|---|--:|")
+    for g in P.GROUP_ORDER:
+        L.append(f"| {g} | {seas_q.get(g, 1.0):.2f}× |")
+    prio_nz = {k: v for k, v in prio_cfg["product_priority_multiplier"].items() if v != 1.0}
+    if prio_nz:
+        L.append("\n| Sản phẩm | Hệ số ưu tiên kinh doanh |")
+        L.append("|---|--:|")
+        for code, mult in sorted(prio_nz.items()):
+            L.append(f"| {code} | {mult:.2f}× |")
+    else:
+        L.append("\n_Chưa có sản phẩm nào được đặt hệ số ưu tiên khác 1.0._")
+    L.append("\nCả 2 hệ số chỉ nhân vào **propensity** (ảnh hưởng thứ hạng đề xuất & dự báo cầu), "
+             "không đổi `fit_score`/điều kiện đủ điều kiện sản phẩm. Hiệu chỉnh qua trang "
+             "Streamlit *AI Agent · Feedback & Tuning → Ưu tiên kinh doanh & Mùa vụ*, rồi chạy lại "
+             "`py src/product_analysis.py` để áp dụng.")
+    L.append("")
+    L.append("## 7. Cách dùng\n")
     L.append("- `ai_product_recommendation_v2` — top-6 sản phẩm phù hợp nhất mỗi khách, kèm lý do.")
     L.append("- `agg_product_demand` — dự báo cầu theo sản phẩm × phân khúc, đưa vào kế hoạch KPI/chiến dịch.")
     L.append("- `agg_segment_product_affinity` — ma trận phân khúc × sản phẩm cho định hướng danh mục.")

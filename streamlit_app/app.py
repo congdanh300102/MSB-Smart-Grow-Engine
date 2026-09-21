@@ -9,6 +9,7 @@ Dữ liệu đọc từ  data/parquet/  (sinh bằng src/generate_data.py + src/
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unicodedata
@@ -1537,8 +1538,9 @@ elif PAGE.startswith("🔁"):
     k5.metric("Đề xuất bị loại sau fix",
               f"{int(ADJ.impact_recos.sum()):,}" if ADJ is not None and len(ADJ) else "0")
 
-    t1, t2, t3, t4 = st.tabs(["📊 Đồng thuận", "🔎 Phát hiện & giải thích",
-                              "🔧 Hiệu chỉnh đã áp", "✍️ RM gửi feedback"])
+    t1, t2, t3, t4, t5 = st.tabs(["📊 Đồng thuận", "🔎 Phát hiện & giải thích",
+                                  "🔧 Hiệu chỉnh đã áp", "✍️ RM gửi feedback",
+                                  "⚙️ Ưu tiên kinh doanh & Mùa vụ"])
 
     with t1:
         rfb = RFB.astype({c: str for c in ("product_code", "product_group", "segment", "rm_verdict")
@@ -1648,3 +1650,95 @@ elif PAGE.startswith("🔁"):
                         "verdict": verdict.split(" — ")[0], "note": note})
         if st.session_state.rm_fb_demo:
             st.dataframe(pd.DataFrame(st.session_state.rm_fb_demo), use_container_width=True, hide_index=True)
+
+    with t5:
+        st.caption("Hệ số **chủ động định hướng kinh doanh** — khác với tab 'Hiệu chỉnh đã áp' "
+                   "(đó là AI Feedback Agent SỬA LỖI mô hình). Hệ số ở đây chỉ nhân vào "
+                   "**propensity** (ảnh hưởng thứ hạng đề xuất & dự báo cầu), không đổi fit_score/"
+                   "điều kiện đủ điều kiện sản phẩm. Lưu xong cần chạy `py src/product_analysis.py` "
+                   "trên server để áp vào dữ liệu thật.")
+
+        _prio_path = MODELS / "priority_config.json"
+        _quarters = ["Q1", "Q2", "Q3", "Q4"]
+        _groups4 = ["CARD", "CASA", "FD", "LENDING"]
+        _default_seasonal = {
+            "Q1": {"CARD": 0.95, "CASA": 1.00, "FD": 1.05, "LENDING": 1.05},
+            "Q2": {"CARD": 1.05, "CASA": 1.00, "FD": 1.00, "LENDING": 1.00},
+            "Q3": {"CARD": 1.10, "CASA": 1.00, "FD": 0.95, "LENDING": 1.00},
+            "Q4": {"CARD": 1.15, "CASA": 1.00, "FD": 0.95, "LENDING": 1.10},
+        }
+        _all_codes = sorted(CAT.product_code.unique()) if CAT is not None else []
+
+        def _load_priority_cfg():
+            cfg = {"seasonal_multiplier": {q: dict(v) for q, v in _default_seasonal.items()},
+                   "product_priority_multiplier": {c: 1.0 for c in _all_codes},
+                   "note": "", "updated_by": None, "updated_date": None}
+            if _prio_path.exists():
+                try:
+                    saved = json.loads(_prio_path.read_text(encoding="utf-8"))
+                    for q, v in saved.get("seasonal_multiplier", {}).items():
+                        cfg["seasonal_multiplier"].setdefault(q, {}).update(v)
+                    cfg["product_priority_multiplier"].update(saved.get("product_priority_multiplier", {}))
+                    cfg["note"] = saved.get("note", "")
+                    cfg["updated_by"] = saved.get("updated_by")
+                    cfg["updated_date"] = saved.get("updated_date")
+                except (OSError, ValueError):
+                    pass
+            return cfg
+
+        prio_cfg = _load_priority_cfg()
+        cur_q = f"Q{(pd.Timestamp.today().month - 1) // 3 + 1}"
+        if prio_cfg.get("updated_date"):
+            st.info(f"Cấu hình hiện tại cập nhật lần cuối **{prio_cfg['updated_date']}**"
+                    + (f" bởi {prio_cfg['updated_by']}" if prio_cfg.get("updated_by") else "")
+                    + f". Quý hiện tại: **{cur_q}**.")
+        else:
+            st.info(f"Chưa có hiệu chỉnh nào — đang dùng hệ số minh hoạ mặc định. Quý hiện tại: **{cur_q}**.")
+
+        st.markdown("**Hệ số mùa vụ theo nhóm sản phẩm × quý**")
+        seas_edit = {}
+        for q in _quarters:
+            cols = st.columns([0.6, 1, 1, 1, 1])
+            cols[0].markdown(f"**{q}**" + (" 🔹" if q == cur_q else ""))
+            seas_edit[q] = {}
+            for i, g in enumerate(_groups4):
+                seas_edit[q][g] = cols[i + 1].number_input(
+                    g, 0.5, 2.0, float(prio_cfg["seasonal_multiplier"].get(q, {}).get(g, 1.0)),
+                    0.05, key=f"seas__{q}__{g}", label_visibility="visible" if q == "Q1" else "collapsed")
+
+        st.markdown("**Hệ số ưu tiên kinh doanh theo sản phẩm** (mặc định 1.0 = không đổi)")
+        if _all_codes:
+            name_of = CAT.set_index("product_code").product_name.to_dict()
+            cur_nz = [c for c, v in prio_cfg["product_priority_multiplier"].items()
+                     if v != 1.0 and c in _all_codes]
+            sel_products = st.multiselect(
+                "Chọn sản phẩm cần đặt hệ số khác 1.0", _all_codes,
+                format_func=lambda c: f"{c} — {name_of.get(c, c)}", default=cur_nz)
+            prio_edit = {c: 1.0 for c in _all_codes}
+            for c in sel_products:
+                prio_edit[c] = st.slider(f"{c} — {name_of.get(c, c)}", 0.5, 2.0,
+                                         float(prio_cfg["product_priority_multiplier"].get(c, 1.0)),
+                                         0.05, key=f"prio__{c}")
+        else:
+            prio_edit = prio_cfg["product_priority_multiplier"]
+            st.info("Chưa có danh mục sản phẩm (`dim_product_catalogue`) để chọn.")
+
+        note = st.text_input("Ghi chú (lý do hiệu chỉnh)", value=prio_cfg.get("note", ""))
+        if st.button("💾 Lưu cấu hình", key="prio_save"):
+            new_cfg = {
+                "seasonal_multiplier": seas_edit,
+                "product_priority_multiplier": prio_edit,
+                "note": note,
+                "updated_by": "RM (Streamlit UI)",
+                "updated_date": str(pd.Timestamp.today().date()),
+            }
+            try:
+                MODELS.mkdir(parents=True, exist_ok=True)
+                _prio_path.write_text(json.dumps(new_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                st.success("Đã lưu `models/priority_config.json`. Chạy `py src/product_analysis.py` "
+                          "trên server để áp hệ số mới vào đề xuất/dự báo, sau đó tải lại app.")
+            except OSError as e:
+                st.error(f"Không lưu được file (ổ đĩa server có thể chỉ đọc): {e}")
+
+        with st.expander("Xem raw `priority_config.json` hiện tại"):
+            st.code(json.dumps(prio_cfg, ensure_ascii=False, indent=2), language="json")
